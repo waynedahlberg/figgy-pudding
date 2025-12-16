@@ -70,10 +70,10 @@ export function TopToolbar() {
         {/* Logo */}
         <div className="flex items-center gap-2 pr-3 border-r border-border-subtle">
           <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-            <span className="text-xs font-bold text-surface0">CF</span>
+            <span className="text-xs font-bold text-surface0">LHC</span>
           </div>
           <span className="text-sm font-semibold text-text-primary hidden sm:block">
-            CanvasForge
+            Longhorn Canvas
           </span>
         </div>
 

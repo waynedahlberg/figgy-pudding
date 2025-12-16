@@ -6,75 +6,35 @@ import {
   ZoomOut,
   Maximize,
   Grid3X3,
-  RulerIcon,
+  Ruler,
   Magnet,
   MousePointer2,
 } from "lucide-react";
+import { useCanvasStore, ZOOM_LEVELS, MIN_ZOOM, MAX_ZOOM } from "@/hooks/use-canvas-store";
 import { cn } from "@/lib/utils";
 
-// =============================================================================
-// TYPES & CONSTANTS
-// =============================================================================
-
-// Predefined zoom levels (percentages)
-const ZOOM_LEVELS = [10, 25, 50, 75, 100, 125, 150, 200, 300, 400];
-
-// Minimum and maximum zoom values
-const MIN_ZOOM = 10;
-const MAX_ZOOM = 400;
-
-// =============================================================================
-// MAIN COMPONENT
-// =============================================================================
+// COMPONENT
 
 export function BottomToolbar() {
-  // View state
-  const [showGrid, setShowGrid] = useState(false);
-  const [showRulers, setShowRulers] = useState(true);
-  const [snapToGrid, setSnapToGrid] = useState(true);
+  // Canvas store
+  const { zoom, zoomIn, zoomOut, setZoom, fitToScreen } = useCanvasStore();
 
-  // Zoom state (percentage, e.g., 100 = 100%)
-  const [zoom, setZoom] = useState(100);
+  // View toggles (local state for now)
+  const [showGrid, setShowGrid] = useState(true);
+  const [showRulers, setShowRulers] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(true);
 
-  // Cursor position (would be updated by canvas in real app)
-  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+  // Mouse position (would come from canvas in production)
+  const [cursorPosition] = useState({ x: 0, y: 0 });
 
-  // ---------- ZOOM HANDLERS ----------
-
-  const handleZoomIn = () => {
-    // Find the next zoom level up
-    const nextLevel = ZOOM_LEVELS.find((level) => level > zoom);
-    if (nextLevel) {
-      setZoom(nextLevel);
-    } else {
-      setZoom(MAX_ZOOM);
-    }
+  // Handle zoom dropdown change
+  const handleZoomChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newZoom = parseFloat(e.target.value);
+    setZoom(newZoom);
   };
 
-  const handleZoomOut = () => {
-    // Find the next zoom level down
-    const prevLevel = [...ZOOM_LEVELS].reverse().find((level) => level < zoom);
-    if (prevLevel) {
-      setZoom(prevLevel);
-    } else {
-      setZoom(MIN_ZOOM);
-    }
-  };
-
-  const handleZoomChange = (newZoom: number) => {
-    // Clamp zoom to valid range
-    const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
-    setZoom(clampedZoom);
-  };
-
-  const handleFitToScreen = () => {
-    // In a real app, this would calculate zoom based on canvas/viewport size
-    setZoom(100);
-  };
-
-  // =============================================================================
-  // RENDER
-  // =============================================================================
+  // Format zoom for display (e.g., 1 -> "100%")
+  const zoomPercent = Math.round(zoom * 100);
 
   return (
     <div className="h-full flex items-center justify-between px-3">
@@ -101,7 +61,7 @@ export function BottomToolbar() {
           onClick={() => setShowGrid(!showGrid)}
         />
         <ViewToggle
-          icon={<RulerIcon className="w-3.5 h-3.5" />}
+          icon={<Ruler className="w-3.5 h-3.5" />}
           label="Rulers"
           shortcut="⇧R"
           isActive={showRulers}
@@ -111,52 +71,67 @@ export function BottomToolbar() {
           icon={<Magnet className="w-3.5 h-3.5" />}
           label="Snap"
           shortcut="⌘⇧;"
-          isActive={snapToGrid}
-          onClick={() => setSnapToGrid(!snapToGrid)}
+          isActive={snapEnabled}
+          onClick={() => setSnapEnabled(!snapEnabled)}
         />
       </div>
 
       {/* ============ RIGHT SECTION - Zoom Controls ============ */}
       <div className="flex items-center gap-1 min-w-[180px] justify-end">
-        {/* Zoom Out Button */}
+        {/* Zoom Out */}
         <ZoomButton
           icon={<ZoomOut className="w-3.5 h-3.5" />}
-          label="Zoom out"
-          onClick={handleZoomOut}
+          label="Zoom out (⌘-)"
+          onClick={() => zoomOut()}
           disabled={zoom <= MIN_ZOOM}
         />
 
-        {/* Zoom Level Dropdown */}
-        <ZoomDropdown
-          zoom={zoom}
-          onZoomChange={handleZoomChange}
-        />
+        {/* Zoom Dropdown */}
+        <select
+          value={zoom}
+          onChange={handleZoomChange}
+          className={cn(
+            "appearance-none bg-surface2 text-text-primary text-xs",
+            "px-2 py-1 rounded cursor-pointer",
+            "hover:bg-surface3 transition-colors",
+            "font-mono min-w-[65px] text-center",
+            "focus:outline-none focus:ring-1 focus:ring-accent"
+          )}
+        >
+          {ZOOM_LEVELS.map((level) => (
+            <option key={level} value={level}>
+              {Math.round(level * 100)}%
+            </option>
+          ))}
+          {/* Show current zoom if it's not a preset level */}
+          {!ZOOM_LEVELS.includes(zoom) && (
+            <option value={zoom}>{zoomPercent}%</option>
+          )}
+        </select>
 
-        {/* Zoom In Button */}
+        {/* Zoom In */}
         <ZoomButton
           icon={<ZoomIn className="w-3.5 h-3.5" />}
-          label="Zoom in"
-          onClick={handleZoomIn}
+          label="Zoom in (⌘+)"
+          onClick={() => zoomIn()}
           disabled={zoom >= MAX_ZOOM}
         />
 
         {/* Divider */}
         <div className="w-px h-4 bg-border-subtle mx-1" />
 
-        {/* Fit to Screen Button */}
+        {/* Fit to Screen */}
         <ZoomButton
           icon={<Maximize className="w-3.5 h-3.5" />}
-          label="Fit to screen"
-          onClick={handleFitToScreen}
+          label="Fit to screen (⌘0)"
+          onClick={fitToScreen}
         />
       </div>
     </div>
   );
 }
 
-// =============================================================================
-// VIEW TOGGLE COMPONENT
-// =============================================================================
+// VIEW TOGGLE
 
 interface ViewToggleProps {
   icon: React.ReactNode;
@@ -186,9 +161,7 @@ function ViewToggle({ icon, label, shortcut, isActive, onClick }: ViewToggleProp
   );
 }
 
-// =============================================================================
-// ZOOM BUTTON COMPONENT
-// =============================================================================
+// ZOOM BUTTON
 
 interface ZoomButtonProps {
   icon: React.ReactNode;
@@ -212,49 +185,5 @@ function ZoomButton({ icon, label, onClick, disabled }: ZoomButtonProps) {
     >
       {icon}
     </button>
-  );
-}
-
-// =============================================================================
-// ZOOM DROPDOWN COMPONENT
-// =============================================================================
-
-interface ZoomDropdownProps {
-  zoom: number;
-  onZoomChange: (zoom: number) => void;
-}
-
-function ZoomDropdown({ zoom, onZoomChange }: ZoomDropdownProps) {
-  // Handle select change
-  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = parseInt(e.target.value, 10);
-    if (!isNaN(value)) {
-      onZoomChange(value);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <select
-        value={zoom}
-        onChange={handleSelectChange}
-        className={cn(
-          "appearance-none bg-surface2 text-text-primary text-xs",
-          "px-2 py-1 rounded cursor-pointer",
-          "hover:bg-surface3 transition-colors",
-          "font-mono min-w-[65px] text-center",
-          "focus:outline-none focus:ring-1 focus:ring-accent"
-        )}
-      >
-        {ZOOM_LEVELS.map((level) => (
-          <option key={level} value={level}>
-            {level}%
-          </option>
-        ))}
-      </select>
-
-      {/* Custom dropdown arrow (optional - select has default) */}
-      {/* You could add a custom chevron icon here if desired */}
-    </div>
   );
 }
