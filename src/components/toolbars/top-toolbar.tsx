@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-
 import {
   MousePointer2,
   Hand,
@@ -16,10 +15,14 @@ import {
   Download,
   Share2,
   Settings,
-  ChevronDown,
+  LayoutGrid,
 } from "lucide-react";
 import { ToolbarButton } from "@/components/shared/toolbar-button";
 import { cn } from "@/lib/utils";
+
+// =============================================================================
+// TYPES
+// =============================================================================
 
 const tools = [
   { id: "select", icon: MousePointer2, label: "Select", shortcut: "V" },
@@ -33,73 +36,84 @@ const tools = [
 
 type ToolId = (typeof tools)[number]["id"];
 
-export function TopToolbar() {
+// =============================================================================
+// PROPS
+// =============================================================================
+
+interface TopToolbarProps {
+  isPaletteVisible?: boolean;
+  onTogglePalette?: () => void;
+}
+
+// =============================================================================
+// COMPONENT
+// =============================================================================
+
+export function TopToolbar({ isPaletteVisible, onTogglePalette }: TopToolbarProps) {
   const router = useRouter();
   const [activeTool, setActiveTool] = useState<ToolId>("select");
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
 
-  // Keyboard shortcuts
-  React.useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
+  // Keyboard shortcuts for tools
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in input
       if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
       ) {
         return;
       }
 
-      if (!event.metaKey && !event.ctrlKey && !event.altKey) {
-        const key = event.key.toLowerCase();
-        const tool = tools.find((t) => t.shortcut.toLowerCase() === key);
-        if (tool) {
-          event.preventDefault();
-          setActiveTool(tool.id);
-        }
+      // Ignore if modifier keys are pressed (except for shortcuts that need them)
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const key = e.key.toLowerCase();
+      const tool = tools.find((t) => t.shortcut.toLowerCase() === key);
+      if (tool) {
+        setActiveTool(tool.id);
       }
-    }
+    };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   return (
-    <div className="h-full flex items-center justify-between px-3">
-      {/* LEFT SECTION */}
-      <div className="flex items-center gap-2">
+    <div className="h-full flex items-center justify-between px-2">
+      {/* ============ LEFT SECTION ============ */}
+      <div className="flex items-center gap-1">
         {/* Logo */}
-        <div className="flex items-center gap-2 pr-3 border-r border-border-subtle">
+        <div className="flex items-center gap-2 px-2 mr-2">
           <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-            <span className="text-xs font-bold text-surface0">LHC</span>
+            <span className="text-xs font-bold text-surface0">CF</span>
           </div>
-          <span className="text-sm font-semibold text-text-primary hidden sm:block">
-            Longhorn Canvas
+          <span className="font-semibold text-text-primary hidden sm:inline">
+            CanvasForge
           </span>
         </div>
 
-        {/* Undo / Redo */}
-        <div className="flex items-center gap-0.5">
-          <ToolbarButton
-            icon={<Undo2 className="w-4 h-4" />}
-            label="Undo"
-            shortcut="⌘Z"
-            isDisabled={!canUndo}
-            variant="ghost"
-            onClick={() => console.log("Undo clicked")}
-          />
-          <ToolbarButton
-            icon={<Redo2 className="w-4 h-4" />}
-            label="Redo"
-            shortcut="⌘⇧Z"
-            isDisabled={!canRedo}
-            variant="ghost"
-            onClick={() => console.log("Redo clicked")}
-          />
-        </div>
+        {/* Divider */}
+        <div className="w-px h-6 bg-border-subtle mx-1" />
+
+        {/* Undo/Redo */}
+        <ToolbarButton
+          icon={<Undo2 className="w-4 h-4" />}
+          label="Undo"
+          shortcut="⌘Z"
+          onClick={() => console.log("Undo")}
+          isDisabled
+        />
+        <ToolbarButton
+          icon={<Redo2 className="w-4 h-4" />}
+          label="Redo"
+          shortcut="⌘⇧Z"
+          onClick={() => console.log("Redo")}
+          isDisabled
+        />
       </div>
 
-      {/* CENTER SECTION - TOOLS */}
-      <div className="flex items-center gap-0.5 bg-surface2/50 rounded-lg p-1">
+      {/* ============ CENTER SECTION - Tools ============ */}
+      <div className="flex items-center gap-0.5 bg-surface2 rounded-lg p-1">
         {tools.map((tool) => (
           <ToolbarButton
             key={tool.id}
@@ -112,46 +126,53 @@ export function TopToolbar() {
         ))}
       </div>
 
-      {/* RIGHT SECTION */}
-      <div className="flex items-center gap-2">
+      {/* ============ RIGHT SECTION ============ */}
+      <div className="flex items-center gap-1">
+        {/* Elements Palette Toggle */}
+        {onTogglePalette && (
+          <ToolbarButton
+            icon={<LayoutGrid className="w-4 h-4" />}
+            label="Elements Palette"
+            shortcut="⌘E"
+            isActive={isPaletteVisible}
+            onClick={onTogglePalette}
+          />
+        )}
+
+        {/* Divider */}
+        <div className="w-px h-6 bg-border-subtle mx-1" />
+
+        {/* Export */}
         <ToolbarButton
           icon={<Download className="w-4 h-4" />}
           label="Export"
           shortcut="⌘E"
-          onClick={() => console.log("Export clicked")}
+          onClick={() => console.log("Export")}
         />
 
-        <button
-          className={cn(
-            "flex items-center gap-1.5 px-3 h-8 rounded-md text-sm font-medium transition-colors",
-            "bg-accent text-surface0 hover:bg-accent-hover"
-          )}
-          onClick={() => console.log("Share clicked")}
-        >
-          <Share2 className="w-4 h-4" />
-          <span className="hidden sm:inline">Share</span>
-        </button>
+        {/* Share */}
+        <ToolbarButton
+          icon={<Share2 className="w-4 h-4" />}
+          label="Share"
+          shortcut="⌘⇧S"
+          onClick={() => console.log("Share")}
+          variant="accent"
+        />
 
-        <div className="w-px h-5 bg-border-subtle mx-1" />
-
+        {/* Settings */}
         <ToolbarButton
           icon={<Settings className="w-4 h-4" />}
           label="Settings"
           shortcut="⌘,"
-          onClick={() => router.push("/settings/profile")}
+          onClick={() => router.push("/settings")}
         />
 
+        {/* User Avatar */}
         <button
-          className={cn(
-            "flex items-center gap-1 pl-1 pr-2 h-8 rounded-md transition-colors",
-            "hover:bg-surface2"
-          )}
-          onClick={() => console.log("User menu clicked")}
+          onClick={() => router.push("/settings/profile")}
+          className="ml-1 w-8 h-8 rounded-full bg-surface3 flex items-center justify-center text-sm font-medium text-text-primary hover:ring-2 hover:ring-accent transition-all"
         >
-          <div className="w-6 h-6 rounded-full bg-surface3 flex items-center justify-center">
-            <span className="text-xs font-medium text-text-primary">JD</span>
-          </div>
-          <ChevronDown className="w-3 h-3 text-text-muted" />
+          JD
         </button>
       </div>
     </div>

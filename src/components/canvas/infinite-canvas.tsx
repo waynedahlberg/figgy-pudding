@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useCanvasStore } from "@/hooks/use-canvas-store";
 import { CanvasElementRenderer } from "@/components/canvas/canvas-element-renderer";
+import { useCanvasDrop } from "@/components/canvas/drag-palette";
 import { cn } from "@/lib/utils";
 
 // =============================================================================
@@ -16,7 +17,6 @@ interface DragState {
   startY: number;
   startPanX: number;
   startPanY: number;
-  // Store the ORIGINAL positions when drag started
   elementStartPositions: Map<string, { x: number; y: number }>;
 }
 
@@ -53,6 +53,9 @@ export function InfiniteCanvas() {
     deleteElements,
   } = useCanvasStore();
 
+  // Drag and drop from palette
+  const { isDragOver, handleDragOver, handleDragLeave, handleDrop } = useCanvasDrop();
+
   // Local state
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
@@ -75,7 +78,6 @@ export function InfiniteCanvas() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in input
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
@@ -83,24 +85,20 @@ export function InfiniteCanvas() {
         return;
       }
 
-      // Space for pan mode
       if (e.code === "Space" && !e.repeat) {
         e.preventDefault();
         setIsSpacePressed(true);
       }
 
-      // Delete/Backspace to delete selected
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length > 0) {
         e.preventDefault();
         deleteElements(selectedIds);
       }
 
-      // Escape to deselect
       if (e.key === "Escape") {
         deselectAll();
       }
 
-      // Zoom shortcuts
       if (e.metaKey || e.ctrlKey) {
         const container = containerRef.current;
         const rect = container?.getBoundingClientRect();
@@ -138,7 +136,7 @@ export function InfiniteCanvas() {
   }, [selectedIds, deleteElements, deselectAll, zoomIn, zoomOut, resetView]);
 
   // =============================================================================
-  // ELEMENT MOUSE DOWN - Start dragging element(s)
+  // ELEMENT MOUSE DOWN
   // =============================================================================
 
   const handleElementMouseDown = useCallback(
@@ -148,31 +146,25 @@ export function InfiniteCanvas() {
       const element = elements.find((el) => el.id === elementId);
       if (!element || element.locked) return;
 
-      // Handle selection
       const isShiftPressed = e.shiftKey;
       const isAlreadySelected = selectedIds.includes(elementId);
 
       let idsToMove: string[];
 
       if (isShiftPressed) {
-        // Shift-click: toggle selection
         selectElement(elementId, true);
-        // If adding to selection, include in move; if removing, use remaining
         if (isAlreadySelected) {
           idsToMove = selectedIds.filter((id) => id !== elementId);
         } else {
           idsToMove = [...selectedIds, elementId];
         }
       } else if (isAlreadySelected) {
-        // Already selected without shift: move all selected
         idsToMove = selectedIds;
       } else {
-        // Click on unselected: select only this one
         selectElement(elementId, false);
         idsToMove = [elementId];
       }
 
-      // Store the STARTING positions of all elements we're going to move
       const startPositions = new Map<string, { x: number; y: number }>();
       elements.forEach((el) => {
         if (idsToMove.includes(el.id) && !el.locked) {
@@ -180,7 +172,6 @@ export function InfiniteCanvas() {
         }
       });
 
-      // Start drag
       setDragState({
         isDragging: true,
         mode: "move",
@@ -200,7 +191,6 @@ export function InfiniteCanvas() {
 
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      // Middle mouse button always pans
       if (e.button === 1) {
         e.preventDefault();
         setDragState({
@@ -215,9 +205,7 @@ export function InfiniteCanvas() {
         return;
       }
 
-      // Left button
       if (e.button === 0) {
-        // Space+Left = pan
         if (isSpacePressed) {
           setDragState({
             isDragging: true,
@@ -231,7 +219,6 @@ export function InfiniteCanvas() {
           return;
         }
 
-        // Left click on empty canvas = deselect
         deselectAll();
       }
     },
@@ -245,7 +232,6 @@ export function InfiniteCanvas() {
 
       const rect = container.getBoundingClientRect();
 
-      // Update mouse position display
       const screenX = e.clientX - rect.left;
       const screenY = e.clientY - rect.top;
       const canvasX = (screenX - panX) / zoom;
@@ -256,22 +242,17 @@ export function InfiniteCanvas() {
         canvas: { x: Math.round(canvasX), y: Math.round(canvasY) },
       });
 
-      // Handle dragging
       if (!dragState.isDragging) return;
 
-      // Calculate pixel delta from drag start
       const pixelDeltaX = e.clientX - dragState.startX;
       const pixelDeltaY = e.clientY - dragState.startY;
 
       if (dragState.mode === "pan") {
-        // Pan: pixel delta applied directly
         setPan(dragState.startPanX + pixelDeltaX, dragState.startPanY + pixelDeltaY);
       } else if (dragState.mode === "move") {
-        // Move elements: convert pixel delta to canvas delta
         const canvasDeltaX = pixelDeltaX / zoom;
         const canvasDeltaY = pixelDeltaY / zoom;
 
-        // Update each element to: startPosition + canvasDelta
         dragState.elementStartPositions.forEach((startPos, id) => {
           updateElement(id, {
             x: startPos.x + canvasDeltaX,
@@ -293,7 +274,6 @@ export function InfiniteCanvas() {
   }, []);
 
   const handleMouseLeave = useCallback(() => {
-    // Only stop drag if we leave the container
     if (dragState.isDragging) {
       setDragState((prev) => ({
         ...prev,
@@ -303,6 +283,20 @@ export function InfiniteCanvas() {
       }));
     }
   }, [dragState.isDragging]);
+
+  // =============================================================================
+  // DROP HANDLER (for drag from palette)
+  // =============================================================================
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      handleDrop(e, rect);
+    },
+    [handleDrop]
+  );
 
   // =============================================================================
   // WHEEL ZOOM
@@ -356,13 +350,19 @@ export function InfiniteCanvas() {
   return (
     <div
       ref={containerRef}
-      className="w-full h-full overflow-hidden relative select-none"
+      className={cn(
+        "w-full h-full overflow-hidden relative select-none",
+        isDragOver && "ring-2 ring-accent ring-inset"
+      )}
       style={{ cursor: getCursor() }}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
       onWheel={handleWheel}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={onDrop}
     >
       {/* Grid Background */}
       <div
@@ -413,6 +413,15 @@ export function InfiniteCanvas() {
           />
         ))}
       </div>
+
+      {/* Drop indicator overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 bg-accent/5 pointer-events-none flex items-center justify-center">
+          <div className="bg-surface1/90 backdrop-blur-sm rounded-lg border border-accent px-4 py-2 text-sm font-medium text-accent">
+            Drop to add element
+          </div>
+        </div>
+      )}
 
       {/* Debug Info */}
       <div className="absolute bottom-4 left-4 bg-surface1/90 backdrop-blur-sm rounded-lg border border-border-subtle p-3 text-xs font-mono pointer-events-none">
