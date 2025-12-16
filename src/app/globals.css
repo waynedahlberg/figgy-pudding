@@ -1,82 +1,94 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 /* ===========================================
-   THEME CONFIGURATION
-   These custom properties define our design system.
-   They become available as Tailwind classes automatically.
-   For example: --color-surface-0 becomes bg-surface-0
+   THEME CONFIGURATION - Tailwind CSS 4.1+
+   
+   In v4, the @theme directive defines CSS variables
+   that automatically generate utility classes.
+   
+   --color-* namespace → generates bg-*, text-*, border-*, etc.
+   --spacing-* namespace → generates p-*, m-*, gap-*, etc.
    =========================================== */
 
 @theme {
-  /* Surface colors (backgrounds) - dark theme */
-  --color-surface-0: oklch(0.13 0.02 260); /* Darkest - main bg */
-  --color-surface-1: oklch(0.16 0.02 260); /* Panels, toolbars */
-  --color-surface-2: oklch(0.19 0.02 260); /* Hover states */
-  --color-surface-3: oklch(0.22 0.02 260); /* Active states */
+  /* ---- Surface colors (backgrounds) ---- */
+  --color-surface0: oklch(0.13 0.02 260);
+  --color-surface1: oklch(0.16 0.02 260);
+  --color-surface2: oklch(0.19 0.02 260);
+  --color-surface3: oklch(0.22 0.02 260);
+  
+  /* ---- Border colors ---- */
+  --color-border: oklch(0.28 0.02 260);
+  --color-border-subtle: oklch(0.20 0.02 260);
+  
+  /* ---- Accent color (green) ---- */
+  --color-accent: oklch(0.65 0.2 145);
+  --color-accent-hover: oklch(0.70 0.22 145);
+  --color-accent-muted: oklch(0.40 0.1 145);
+  
+  /* ---- Text colors ---- */
+  --color-text-primary: oklch(0.95 0.01 260);
+  --color-text-secondary: oklch(0.70 0.02 260);
+  --color-text-muted: oklch(0.50 0.02 260);
+}
 
-  /* Border colors */
-  --color-border: oklch(0.28 0.02 260); /* Visible borders */
-  --color-border-subtle: oklch(0.2 0.02 260); /* Subtle dividers */
+/* ===========================================
+   CSS VARIABLES FOR NON-COLOR VALUES
+   These are regular CSS variables (not @theme)
+   because they don't map to Tailwind namespaces.
+   We reference them with var() in classes.
+   =========================================== */
 
-  /* Accent color (green) */
-  --color-accent: oklch(0.65 0.2 145); /* Primary accent */
-  --color-accent-hover: oklch(0.7 0.22 145); /* Accent hover */
-  --color-accent-muted: oklch(0.4 0.1 145); /* Accent subdued */
-
-  /* Text colors */
-  --color-text-primary: oklch(0.95 0.01 260); /* Main text */
-  --color-text-secondary: oklch(0.7 0.02 260); /* Secondary text */
-  --color-text-muted: oklch(0.5 0.02 260); /* Disabled/hint text */
-
-  /* Fixed dimensions */
-  --spacing-toolbar-height: 48px;
-  --spacing-statusbar-height: 40px;
-  --spacing-sidebar-width: 280px;
+:root {
+  --toolbar-height: 48px;
+  --statusbar-height: 40px;
+  --sidebar-width: 280px;
 }
 
 /* ===========================================
    BASE STYLES
-   These apply to base HTML elements.
-   This is where we lock the viewport.
    =========================================== */
 
 @layer base {
   html {
     height: 100%;
     overflow: hidden;
-    background-color: var(--color-surface-0);
-    color: var(--color-text-primary);
   }
-
+  
   body {
     height: 100%;
     overflow: hidden;
     margin: 0;
+    background-color: var(--color-surface0);
+    color: var(--color-text-primary);
   }
 }
 
 /* ===========================================
    COMPONENT STYLES
-   Reusable classes for our app structure.
    =========================================== */
 
 @layer components {
-  /* Custom scrollbar for panels */
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
-
+  
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
-
+  
   .custom-scrollbar::-webkit-scrollbar-thumb {
     background: var(--color-border);
     border-radius: 3px;
   }
-
+  
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: var(--color-text-muted);
   }
 }
+
+
+
+
+

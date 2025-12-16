@@ -1,22 +1,27 @@
 import { ReactNode } from "react";
+import { TopToolbar } from "@/components/toolbars/top-toolbar";
+import { LeftSidebar } from "@/components/toolbars/left-sidebar";
+import { BottomToolbar } from "@/components/toolbars/bottom-toolbar";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-surface-0">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-surface0">
       {/* Top Toolbar */}
-      <header className="h-[--spacing-toolbar-height] shrink-0 bg-surface-1 border-b border-border-subtle">
-        <div className="h-full flex items-center px-3">
-          <span className="text-sm text-text-secondary">Top Toolbar</span>
-        </div>
+      <header
+        className="shrink-0 bg-surface1 border-b border-border-subtle"
+        style={{ height: 'var(--toolbar-height)' }}
+      >
+        <TopToolbar />
       </header>
 
       {/* Middle Section: Sidebar + Main Content */}
       <div className="flex-1 flex min-h-0">
         {/* Left Sidebar */}
-        <aside className="w-[--spacing-sidebar-width] shrink-0 bg-surface-1 border-r border-border-subtle">
-          <div className="p-3">
-            <span className="text-sm text-text-secondary">Left Sidebar</span>
-          </div>
+        <aside
+          className="shrink-0 bg-surface1 border-r border-border-subtle overflow-hidden"
+          style={{ width: 'var(--sidebar-width)' }}
+        >
+          <LeftSidebar />
         </aside>
 
         {/* Main Viewport */}
@@ -26,10 +31,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       </div>
 
       {/* Bottom Toolbar */}
-      <footer className="h-[--spacing-statusbar-height] shrink-0 bg-surface-1 border-t border-border-subtle">
-        <div className="h-full flex items-center px-3">
-          <span className="text-sm text-text-secondary">Bottom Toolbar</span>
-        </div>
+      <footer
+        className="shrink-0 bg-surface1 border-t border-border-subtle"
+        style={{ height: 'var(--statusbar-height)' }}
+      >
+        <BottomToolbar />
       </footer>
     </div>
   );
