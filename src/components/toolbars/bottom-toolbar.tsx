@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   ZoomIn,
   ZoomOut,
@@ -13,19 +12,26 @@ import {
 import { useCanvasStore, ZOOM_LEVELS, MIN_ZOOM, MAX_ZOOM } from "@/hooks/use-canvas-store";
 import { cn } from "@/lib/utils";
 
+// =============================================================================
 // COMPONENT
+// =============================================================================
 
 export function BottomToolbar() {
-  // Canvas store
-  const { zoom, zoomIn, zoomOut, setZoom, fitToScreen } = useCanvasStore();
-
-  // View toggles (local state for now)
-  const [showGrid, setShowGrid] = useState(true);
-  const [showRulers, setShowRulers] = useState(false);
-  const [snapEnabled, setSnapEnabled] = useState(true);
-
-  // Mouse position (would come from canvas in production)
-  const [cursorPosition] = useState({ x: 0, y: 0 });
+  // Canvas store - now includes snap and grid settings
+  const {
+    zoom,
+    panX,
+    panY,
+    snapToGrid: snapEnabled,
+    showGrid,
+    gridSize,
+    zoomIn,
+    zoomOut,
+    setZoom,
+    fitToScreen,
+    toggleSnapToGrid,
+    toggleShowGrid,
+  } = useCanvasStore();
 
   // Handle zoom dropdown change
   const handleZoomChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -38,15 +44,12 @@ export function BottomToolbar() {
 
   return (
     <div className="h-full flex items-center justify-between px-3">
-      {/* ============ LEFT SECTION - Cursor Position ============ */}
+      {/* ============ LEFT SECTION - Canvas Info ============ */}
       <div className="flex items-center gap-3 min-w-[140px]">
         <div className="flex items-center gap-1.5 text-xs text-text-secondary font-mono">
           <MousePointer2 className="w-3 h-3" />
           <span>
-            X: <span className="text-text-primary w-8 inline-block">{cursorPosition.x}</span>
-          </span>
-          <span>
-            Y: <span className="text-text-primary w-8 inline-block">{cursorPosition.y}</span>
+            Pan: <span className="text-text-primary">{Math.round(panX)}, {Math.round(panY)}</span>
           </span>
         </div>
       </div>
@@ -58,21 +61,21 @@ export function BottomToolbar() {
           label="Grid"
           shortcut="⌘'"
           isActive={showGrid}
-          onClick={() => setShowGrid(!showGrid)}
+          onClick={toggleShowGrid}
         />
         <ViewToggle
           icon={<Ruler className="w-3.5 h-3.5" />}
           label="Rulers"
           shortcut="⇧R"
-          isActive={showRulers}
-          onClick={() => setShowRulers(!showRulers)}
+          isActive={false}
+          onClick={() => {}} // Placeholder for rulers module
         />
         <ViewToggle
           icon={<Magnet className="w-3.5 h-3.5" />}
-          label="Snap"
+          label={`Snap${snapEnabled ? ` (${gridSize}px)` : ''}`}
           shortcut="⌘⇧;"
           isActive={snapEnabled}
-          onClick={() => setSnapEnabled(!snapEnabled)}
+          onClick={toggleSnapToGrid}
         />
       </div>
 
@@ -131,7 +134,9 @@ export function BottomToolbar() {
   );
 }
 
+// =============================================================================
 // VIEW TOGGLE
+// =============================================================================
 
 interface ViewToggleProps {
   icon: React.ReactNode;
@@ -161,7 +166,9 @@ function ViewToggle({ icon, label, shortcut, isActive, onClick }: ViewToggleProp
   );
 }
 
+// =============================================================================
 // ZOOM BUTTON
+// =============================================================================
 
 interface ZoomButtonProps {
   icon: React.ReactNode;

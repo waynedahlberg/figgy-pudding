@@ -25,6 +25,10 @@ import {
   getElementCenter,
   ROTATION_CURSOR,
 } from "@/lib/rotation-utils";
+import {
+  snapToGrid,
+  applySnapToResize,
+} from "@/lib/snap-utils";
 import { cn } from "@/lib/utils";
 
 // =============================================================================
@@ -53,12 +57,6 @@ interface DragState {
 }
 
 // =============================================================================
-// CONSTANTS
-// =============================================================================
-
-const GRID_SIZE = 20;
-
-// =============================================================================
 // COMPONENT
 // =============================================================================
 
@@ -73,6 +71,9 @@ export function InfiniteCanvas() {
     zoom,
     elements,
     selectedIds,
+    snapToGrid: snapEnabled,
+    gridSize,
+    showGrid,
     setPan,
     setZoom,
     selectElement,
@@ -327,12 +328,10 @@ export function InfiniteCanvas() {
 
       const rect = container.getBoundingClientRect();
 
-      // Calculate element center in screen coordinates
       const center = getElementCenter(element.x, element.y, element.width, element.height);
       const screenCenterX = center.x * zoom + panX + rect.left;
       const screenCenterY = center.y * zoom + panY + rect.top;
 
-      // Calculate starting angle from center to mouse
       const startAngle = calculateAngle(screenCenterX, screenCenterY, e.clientX, e.clientY);
 
       setDragState({
@@ -388,10 +387,16 @@ export function InfiniteCanvas() {
         const canvasDeltaY = pixelDeltaY / zoom;
 
         dragState.elementStartPositions.forEach((startPos, id) => {
-          updateElement(id, {
-            x: startPos.x + canvasDeltaX,
-            y: startPos.y + canvasDeltaY,
-          });
+          let newX = startPos.x + canvasDeltaX;
+          let newY = startPos.y + canvasDeltaY;
+
+          // Apply grid snapping if enabled
+          if (snapEnabled) {
+            newX = snapToGrid(newX, gridSize);
+            newY = snapToGrid(newY, gridSize);
+          }
+
+          updateElement(id, { x: newX, y: newY });
         });
       } else if (dragState.mode === "resize") {
         if (!dragState.resizeHandle || !dragState.resizeStartBounds || !dragState.resizeElementId) {
@@ -401,7 +406,7 @@ export function InfiniteCanvas() {
         const canvasDeltaX = pixelDeltaX / zoom;
         const canvasDeltaY = pixelDeltaY / zoom;
 
-        const newBounds = calculateResize(
+        let newBounds = calculateResize(
           dragState.resizeHandle,
           dragState.resizeStartBounds,
           canvasDeltaX,
@@ -416,6 +421,11 @@ export function InfiniteCanvas() {
           }
         );
 
+        // Apply grid snapping to resize if enabled
+        if (snapEnabled) {
+          newBounds = applySnapToResize(newBounds, gridSize, true);
+        }
+
         updateElement(dragState.resizeElementId, {
           x: newBounds.x,
           y: newBounds.y,
@@ -427,7 +437,6 @@ export function InfiniteCanvas() {
           return;
         }
 
-        // Calculate current angle from center to mouse
         const currentAngle = calculateAngle(
           dragState.rotateCenter.x,
           dragState.rotateCenter.y,
@@ -435,10 +444,7 @@ export function InfiniteCanvas() {
           e.clientY
         );
 
-        // Calculate rotation delta
         const rotationDelta = calculateRotationDelta(dragState.rotateStartAngle, currentAngle);
-
-        // Calculate new rotation
         let newRotation = dragState.rotateElementStartRotation + rotationDelta;
 
         // Snap to 15° increments when shift is held
@@ -446,7 +452,6 @@ export function InfiniteCanvas() {
           newRotation = snapAngle(newRotation, 15);
         }
 
-        // Normalize to 0-360 range
         newRotation = normalizeAngle(newRotation);
 
         updateElement(dragState.rotateElementId, {
@@ -454,7 +459,7 @@ export function InfiniteCanvas() {
         });
       }
     },
-    [dragState, panX, panY, zoom, setPan, updateElement]
+    [dragState, panX, panY, zoom, setPan, updateElement, snapEnabled, gridSize]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -555,9 +560,9 @@ export function InfiniteCanvas() {
   // GRID & CURSOR
   // =============================================================================
 
-  const gridSize = GRID_SIZE * zoom;
-  const gridOffsetX = panX % gridSize;
-  const gridOffsetY = panY % gridSize;
+  const scaledGridSize = gridSize * zoom;
+  const gridOffsetX = panX % scaledGridSize;
+  const gridOffsetY = panY % scaledGridSize;
 
   const getCursor = () => {
     if (dragState.isDragging) {
@@ -596,17 +601,19 @@ export function InfiniteCanvas() {
       onDrop={onDrop}
     >
       {/* Grid Background */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          backgroundImage: `
-            linear-gradient(to right, var(--color-border-subtle) 1px, transparent 1px),
-            linear-gradient(to bottom, var(--color-border-subtle) 1px, transparent 1px)
-          `,
-          backgroundSize: `${gridSize}px ${gridSize}px`,
-          backgroundPosition: `${gridOffsetX}px ${gridOffsetY}px`,
-        }}
-      />
+      {showGrid && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, var(--color-border-subtle) 1px, transparent 1px),
+              linear-gradient(to bottom, var(--color-border-subtle) 1px, transparent 1px)
+            `,
+            backgroundSize: `${scaledGridSize}px ${scaledGridSize}px`,
+            backgroundPosition: `${gridOffsetX}px ${gridOffsetY}px`,
+          }}
+        />
+      )}
 
       {/* Origin Crosshair */}
       <div
@@ -670,8 +677,10 @@ export function InfiniteCanvas() {
           <span className="text-accent">
             {mousePos.canvas.x}, {mousePos.canvas.y}
           </span>
-          <span className="text-text-muted">Selected:</span>
-          <span className="text-text-primary">{selectedIds.length} elements</span>
+          <span className="text-text-muted">Snap:</span>
+          <span className={snapEnabled ? "text-green-400" : "text-text-muted"}>
+            {snapEnabled ? `ON (${gridSize}px)` : "OFF"}
+          </span>
         </div>
       </div>
 

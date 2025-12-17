@@ -36,6 +36,10 @@ interface CanvasState {
   // Elements
   elements: CanvasElement[];
   selectedIds: string[];
+  // Settings
+  snapToGrid: boolean;
+  gridSize: number;
+  showGrid: boolean;
 }
 
 interface CanvasStore extends CanvasState {
@@ -57,6 +61,12 @@ interface CanvasStore extends CanvasState {
   selectElement: (id: string, addToSelection?: boolean) => void;
   deselectAll: () => void;
   selectAll: () => void;
+  // Settings actions
+  setSnapToGrid: (enabled: boolean) => void;
+  toggleSnapToGrid: () => void;
+  setGridSize: (size: number) => void;
+  setShowGrid: (show: boolean) => void;
+  toggleShowGrid: () => void;
   // Helpers
   getSelectedElements: () => CanvasElement[];
   getElementById: (id: string) => CanvasElement | undefined;
@@ -71,6 +81,7 @@ interface CanvasStore extends CanvasState {
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 4;
 export const ZOOM_LEVELS = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+export const DEFAULT_GRID_SIZE = 20;
 
 // Default colors for new elements
 const ELEMENT_COLORS = [
@@ -152,6 +163,10 @@ const initialState: CanvasState = {
   zoom: 1,
   elements: initialElements,
   selectedIds: [],
+  // Settings
+  snapToGrid: false,
+  gridSize: DEFAULT_GRID_SIZE,
+  showGrid: true,
 };
 
 // =============================================================================
@@ -320,6 +335,30 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ---------------------------------------------------------------------------
+  // SETTINGS ACTIONS
+  // ---------------------------------------------------------------------------
+
+  const setSnapToGrid = useCallback((enabled: boolean) => {
+    setState((prev) => ({ ...prev, snapToGrid: enabled }));
+  }, []);
+
+  const toggleSnapToGrid = useCallback(() => {
+    setState((prev) => ({ ...prev, snapToGrid: !prev.snapToGrid }));
+  }, []);
+
+  const setGridSize = useCallback((size: number) => {
+    setState((prev) => ({ ...prev, gridSize: Math.max(1, size) }));
+  }, []);
+
+  const setShowGrid = useCallback((show: boolean) => {
+    setState((prev) => ({ ...prev, showGrid: show }));
+  }, []);
+
+  const toggleShowGrid = useCallback(() => {
+    setState((prev) => ({ ...prev, showGrid: !prev.showGrid }));
+  }, []);
+
+  // ---------------------------------------------------------------------------
   // HELPERS
   // ---------------------------------------------------------------------------
 
@@ -372,6 +411,11 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     selectElement,
     deselectAll,
     selectAll,
+    setSnapToGrid,
+    toggleSnapToGrid,
+    setGridSize,
+    setShowGrid,
+    toggleShowGrid,
     getSelectedElements,
     getElementById,
     screenToCanvas,

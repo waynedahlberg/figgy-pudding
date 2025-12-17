@@ -182,12 +182,17 @@ export function getRotationHandleAtPoint(
 
 /**
  * CSS for a custom rotation cursor.
- * This creates a curved arrow suggesting rotation.
+ * This creates a curved arrow with a white outline for visibility on any background.
+ * Similar to Figma's rotation cursor style.
  */
 export const ROTATION_CURSOR_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M21 12a9 9 0 1 1-9-9"/>
-  <polyline points="21 3 21 9 15 9"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <!-- White outline/stroke for contrast -->
+  <path d="M21 12a9 9 0 1 1-9-9" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="21 3 21 9 15 9" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Black inner stroke -->
+  <path d="M21 12a9 9 0 1 1-9-9" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="21 3 21 9 15 9" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 `;
 
