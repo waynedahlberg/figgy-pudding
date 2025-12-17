@@ -4,20 +4,52 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { useCanvasStore } from "@/hooks/use-canvas-store";
 import { CanvasElementRenderer } from "@/components/canvas/canvas-element-renderer";
 import { useCanvasDrop } from "@/components/canvas/drag-palette";
+import {
+  ResizeHandle,
+  calculateResize,
+  RESIZE_CURSORS,
+  ElementBounds,
+} from "@/lib/resize-utils";
+import {
+  handleWheelEvent,
+  shouldStartPan,
+  getPanCursor,
+  stepZoomIn,
+  stepZoomOut,
+} from "@/lib/pan-zoom-utils";
+import {
+  calculateAngle,
+  calculateRotationDelta,
+  normalizeAngle,
+  snapAngle,
+  getElementCenter,
+  ROTATION_CURSOR,
+} from "@/lib/rotation-utils";
 import { cn } from "@/lib/utils";
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
+type DragMode = "pan" | "move" | "resize" | "rotate" | null;
+
 interface DragState {
   isDragging: boolean;
-  mode: "pan" | "move" | null;
+  mode: DragMode;
   startX: number;
   startY: number;
   startPanX: number;
   startPanY: number;
   elementStartPositions: Map<string, { x: number; y: number }>;
+  // Resize-specific state
+  resizeElementId: string | null;
+  resizeHandle: ResizeHandle | null;
+  resizeStartBounds: ElementBounds | null;
+  // Rotate-specific state
+  rotateElementId: string | null;
+  rotateStartAngle: number;
+  rotateElementStartRotation: number;
+  rotateCenter: { x: number; y: number } | null;
 }
 
 // =============================================================================
@@ -25,7 +57,6 @@ interface DragState {
 // =============================================================================
 
 const GRID_SIZE = 20;
-const WHEEL_ZOOM_SPEED = 0.001;
 
 // =============================================================================
 // COMPONENT
@@ -43,10 +74,7 @@ export function InfiniteCanvas() {
     elements,
     selectedIds,
     setPan,
-    zoomTo,
-    zoomIn,
-    zoomOut,
-    resetView,
+    setZoom,
     selectElement,
     deselectAll,
     updateElement,
@@ -65,6 +93,13 @@ export function InfiniteCanvas() {
     startPanX: 0,
     startPanY: 0,
     elementStartPositions: new Map(),
+    resizeElementId: null,
+    resizeHandle: null,
+    resizeStartBounds: null,
+    rotateElementId: null,
+    rotateStartAngle: 0,
+    rotateElementStartRotation: 0,
+    rotateCenter: null,
   });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [mousePos, setMousePos] = useState({
@@ -107,13 +142,18 @@ export function InfiniteCanvas() {
 
         if (e.key === "=" || e.key === "+") {
           e.preventDefault();
-          zoomIn(centerX, centerY);
+          const result = stepZoomIn(panX, panY, zoom, centerX, centerY);
+          setPan(result.panX, result.panY);
+          setZoom(result.zoom);
         } else if (e.key === "-") {
           e.preventDefault();
-          zoomOut(centerX, centerY);
+          const result = stepZoomOut(panX, panY, zoom, centerX, centerY);
+          setPan(result.panX, result.panY);
+          setZoom(result.zoom);
         } else if (e.key === "0") {
           e.preventDefault();
-          resetView();
+          setPan(0, 0);
+          setZoom(1);
         }
       }
     };
@@ -133,15 +173,54 @@ export function InfiniteCanvas() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedIds, deleteElements, deselectAll, zoomIn, zoomOut, resetView]);
+  }, [selectedIds, deleteElements, deselectAll, panX, panY, zoom, setPan, setZoom]);
 
   // =============================================================================
-  // ELEMENT MOUSE DOWN
+  // CANVAS MOUSE HANDLERS
+  // =============================================================================
+
+  const handleCanvasMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (shouldStartPan(e.button, isSpacePressed)) {
+        e.preventDefault();
+        setDragState({
+          isDragging: true,
+          mode: "pan",
+          startX: e.clientX,
+          startY: e.clientY,
+          startPanX: panX,
+          startPanY: panY,
+          elementStartPositions: new Map(),
+          resizeElementId: null,
+          resizeHandle: null,
+          resizeStartBounds: null,
+          rotateElementId: null,
+          rotateStartAngle: 0,
+          rotateElementStartRotation: 0,
+          rotateCenter: null,
+        });
+        return;
+      }
+
+      if (e.button === 0) {
+        deselectAll();
+      }
+    },
+    [panX, panY, isSpacePressed, deselectAll]
+  );
+
+  // =============================================================================
+  // ELEMENT MOUSE DOWN (for moving)
   // =============================================================================
 
   const handleElementMouseDown = useCallback(
     (e: React.MouseEvent, elementId: string) => {
       e.stopPropagation();
+
+      if (isSpacePressed) {
+        handleCanvasMouseDown(e);
+        return;
+      }
 
       const element = elements.find((el) => el.id === elementId);
       if (!element || element.locked) return;
@@ -180,50 +259,105 @@ export function InfiniteCanvas() {
         startPanX: panX,
         startPanY: panY,
         elementStartPositions: startPositions,
+        resizeElementId: null,
+        resizeHandle: null,
+        resizeStartBounds: null,
+        rotateElementId: null,
+        rotateStartAngle: 0,
+        rotateElementStartRotation: 0,
+        rotateCenter: null,
+      });
+    },
+    [elements, selectedIds, selectElement, panX, panY, isSpacePressed, handleCanvasMouseDown]
+  );
+
+  // =============================================================================
+  // RESIZE START
+  // =============================================================================
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent, elementId: string, handle: ResizeHandle) => {
+      e.stopPropagation();
+
+      const element = elements.find((el) => el.id === elementId);
+      if (!element || element.locked) return;
+
+      if (!selectedIds.includes(elementId)) {
+        selectElement(elementId, false);
+      }
+
+      setDragState({
+        isDragging: true,
+        mode: "resize",
+        startX: e.clientX,
+        startY: e.clientY,
+        startPanX: panX,
+        startPanY: panY,
+        elementStartPositions: new Map(),
+        resizeElementId: elementId,
+        resizeHandle: handle,
+        resizeStartBounds: {
+          x: element.x,
+          y: element.y,
+          width: element.width,
+          height: element.height,
+        },
+        rotateElementId: null,
+        rotateStartAngle: 0,
+        rotateElementStartRotation: 0,
+        rotateCenter: null,
       });
     },
     [elements, selectedIds, selectElement, panX, panY]
   );
 
   // =============================================================================
-  // CANVAS MOUSE HANDLERS
+  // ROTATE START
   // =============================================================================
 
-  const handleCanvasMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.button === 1) {
-        e.preventDefault();
-        setDragState({
-          isDragging: true,
-          mode: "pan",
-          startX: e.clientX,
-          startY: e.clientY,
-          startPanX: panX,
-          startPanY: panY,
-          elementStartPositions: new Map(),
-        });
-        return;
-      }
+  const handleRotateStart = useCallback(
+    (e: React.MouseEvent, elementId: string) => {
+      e.stopPropagation();
 
-      if (e.button === 0) {
-        if (isSpacePressed) {
-          setDragState({
-            isDragging: true,
-            mode: "pan",
-            startX: e.clientX,
-            startY: e.clientY,
-            startPanX: panX,
-            startPanY: panY,
-            elementStartPositions: new Map(),
-          });
-          return;
-        }
+      const element = elements.find((el) => el.id === elementId);
+      if (!element || element.locked) return;
 
-        deselectAll();
-      }
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+
+      // Calculate element center in screen coordinates
+      const center = getElementCenter(element.x, element.y, element.width, element.height);
+      const screenCenterX = center.x * zoom + panX + rect.left;
+      const screenCenterY = center.y * zoom + panY + rect.top;
+
+      // Calculate starting angle from center to mouse
+      const startAngle = calculateAngle(screenCenterX, screenCenterY, e.clientX, e.clientY);
+
+      setDragState({
+        isDragging: true,
+        mode: "rotate",
+        startX: e.clientX,
+        startY: e.clientY,
+        startPanX: panX,
+        startPanY: panY,
+        elementStartPositions: new Map(),
+        resizeElementId: null,
+        resizeHandle: null,
+        resizeStartBounds: null,
+        rotateElementId: elementId,
+        rotateStartAngle: startAngle,
+        rotateElementStartRotation: element.rotation,
+        rotateCenter: { x: screenCenterX, y: screenCenterY },
+      });
     },
-    [panX, panY, isSpacePressed, deselectAll]
+    [elements, panX, panY, zoom]
   );
+
+  // =============================================================================
+  // MOUSE MOVE
+  // =============================================================================
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
@@ -259,6 +393,65 @@ export function InfiniteCanvas() {
             y: startPos.y + canvasDeltaY,
           });
         });
+      } else if (dragState.mode === "resize") {
+        if (!dragState.resizeHandle || !dragState.resizeStartBounds || !dragState.resizeElementId) {
+          return;
+        }
+
+        const canvasDeltaX = pixelDeltaX / zoom;
+        const canvasDeltaY = pixelDeltaY / zoom;
+
+        const newBounds = calculateResize(
+          dragState.resizeHandle,
+          dragState.resizeStartBounds,
+          canvasDeltaX,
+          canvasDeltaY,
+          {
+            minWidth: 20,
+            minHeight: 20,
+            lockAspectRatio: e.shiftKey,
+            aspectRatio: e.shiftKey
+              ? dragState.resizeStartBounds.width / dragState.resizeStartBounds.height
+              : null,
+          }
+        );
+
+        updateElement(dragState.resizeElementId, {
+          x: newBounds.x,
+          y: newBounds.y,
+          width: newBounds.width,
+          height: newBounds.height,
+        });
+      } else if (dragState.mode === "rotate") {
+        if (!dragState.rotateElementId || !dragState.rotateCenter) {
+          return;
+        }
+
+        // Calculate current angle from center to mouse
+        const currentAngle = calculateAngle(
+          dragState.rotateCenter.x,
+          dragState.rotateCenter.y,
+          e.clientX,
+          e.clientY
+        );
+
+        // Calculate rotation delta
+        const rotationDelta = calculateRotationDelta(dragState.rotateStartAngle, currentAngle);
+
+        // Calculate new rotation
+        let newRotation = dragState.rotateElementStartRotation + rotationDelta;
+
+        // Snap to 15° increments when shift is held
+        if (e.shiftKey) {
+          newRotation = snapAngle(newRotation, 15);
+        }
+
+        // Normalize to 0-360 range
+        newRotation = normalizeAngle(newRotation);
+
+        updateElement(dragState.rotateElementId, {
+          rotation: newRotation,
+        });
       }
     },
     [dragState, panX, panY, zoom, setPan, updateElement]
@@ -270,6 +463,13 @@ export function InfiniteCanvas() {
       isDragging: false,
       mode: null,
       elementStartPositions: new Map(),
+      resizeElementId: null,
+      resizeHandle: null,
+      resizeStartBounds: null,
+      rotateElementId: null,
+      rotateStartAngle: 0,
+      rotateElementStartRotation: 0,
+      rotateCenter: null,
     }));
   }, []);
 
@@ -280,12 +480,65 @@ export function InfiniteCanvas() {
         isDragging: false,
         mode: null,
         elementStartPositions: new Map(),
+        resizeElementId: null,
+        resizeHandle: null,
+        resizeStartBounds: null,
+        rotateElementId: null,
+        rotateStartAngle: 0,
+        rotateElementStartRotation: 0,
+        rotateCenter: null,
       }));
     }
   }, [dragState.isDragging]);
 
   // =============================================================================
-  // DROP HANDLER (for drag from palette)
+  // WHEEL HANDLER
+  // =============================================================================
+
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+
+      const result = handleWheelEvent(
+        { panX, panY, zoom },
+        {
+          deltaX: e.deltaX,
+          deltaY: e.deltaY,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+          clientX: e.clientX,
+          clientY: e.clientY,
+        },
+        rect
+      );
+
+      if (result.panX !== panX || result.panY !== panY) {
+        setPan(result.panX, result.panY);
+      }
+      if (result.zoom !== zoom) {
+        setZoom(result.zoom);
+      }
+    },
+    [panX, panY, zoom, setPan, setZoom]
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const preventWheel = (e: WheelEvent) => e.preventDefault();
+    container.addEventListener("wheel", preventWheel, { passive: false });
+    return () => container.removeEventListener("wheel", preventWheel);
+  }, []);
+
+  // =============================================================================
+  // DROP HANDLER
   // =============================================================================
 
   const onDrop = useCallback(
@@ -299,37 +552,7 @@ export function InfiniteCanvas() {
   );
 
   // =============================================================================
-  // WHEEL ZOOM
-  // =============================================================================
-
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
-      e.preventDefault();
-      const container = containerRef.current;
-      if (!container) return;
-
-      const rect = container.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      const zoomDelta = -e.deltaY * WHEEL_ZOOM_SPEED;
-      const newZoom = zoom * (1 + zoomDelta);
-
-      zoomTo(newZoom, mouseX, mouseY);
-    },
-    [zoom, zoomTo]
-  );
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const preventWheel = (e: WheelEvent) => e.preventDefault();
-    container.addEventListener("wheel", preventWheel, { passive: false });
-    return () => container.removeEventListener("wheel", preventWheel);
-  }, []);
-
-  // =============================================================================
-  // GRID
+  // GRID & CURSOR
   // =============================================================================
 
   const gridSize = GRID_SIZE * zoom;
@@ -337,10 +560,18 @@ export function InfiniteCanvas() {
   const gridOffsetY = panY % gridSize;
 
   const getCursor = () => {
-    if (dragState.isDragging && dragState.mode === "pan") return "grabbing";
-    if (dragState.isDragging && dragState.mode === "move") return "move";
-    if (isSpacePressed) return "grab";
-    return "default";
+    if (dragState.isDragging) {
+      if (dragState.mode === "resize" && dragState.resizeHandle) {
+        return RESIZE_CURSORS[dragState.resizeHandle];
+      }
+      if (dragState.mode === "rotate") {
+        return ROTATION_CURSOR;
+      }
+      if (dragState.mode === "move") {
+        return "move";
+      }
+    }
+    return getPanCursor(isSpacePressed, dragState.mode === "pan");
   };
 
   // =============================================================================
@@ -409,7 +640,10 @@ export function InfiniteCanvas() {
             key={element.id}
             element={element}
             isSelected={selectedIds.includes(element.id)}
+            zoom={zoom}
             onMouseDown={handleElementMouseDown}
+            onResizeStart={handleResizeStart}
+            onRotateStart={handleRotateStart}
           />
         ))}
       </div>
@@ -441,8 +675,8 @@ export function InfiniteCanvas() {
         </div>
       </div>
 
-      {/* Mode Indicators */}
-      {isSpacePressed && (
+      {/* Pan Mode Indicator */}
+      {isSpacePressed && !dragState.isDragging && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-surface1/90 backdrop-blur-sm rounded-lg border border-border-subtle px-3 py-1.5 text-xs font-medium text-text-secondary pointer-events-none">
           Pan Mode — Click and drag to pan
         </div>

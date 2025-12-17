@@ -105,14 +105,23 @@ interface DragPaletteProps {
 }
 
 export function DragPalette({ isVisible, onClose }: DragPaletteProps) {
-  // Position state (window coordinates, using left/top) - lazy initialized on client
-  const [position, setPosition] = useState<Position>(() => ({
-    x: typeof window !== 'undefined' ? window.innerWidth - 176 : 0,
-    y: 60,
-  }));
+  // Position state (window coordinates, using left/top)
+  const [position, setPosition] = useState<Position>({ x: 0, y: 60 });
   const [isDraggingPalette, setIsDraggingPalette] = useState(false);
   const dragStartRef = useRef<{ x: number; y: number; posX: number; posY: number } | null>(null);
   const paletteRef = useRef<HTMLDivElement>(null);
+  const hasInitialized = useRef(false);
+
+  // Position to top-right on mount (client-side only)
+  // This effect synchronizes with the external window system to avoid hydration mismatch
+  // We start with x:0 on both server/client, then update to correct position after mount
+  useEffect(() => {
+    if (!hasInitialized.current && typeof window !== 'undefined') {
+      // eslint-disable-next-line
+      setPosition({ x: window.innerWidth - 176, y: 60 });
+      hasInitialized.current = true;
+    }
+  }, []);
 
   // Handle palette drag start
   const handlePaletteDragStart = useCallback((e: React.MouseEvent) => {

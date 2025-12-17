@@ -1,8 +1,18 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { CanvasElement } from "@/hooks/use-canvas-store";
-import { cn } from "@/lib/utils";
+import {
+  ResizeHandle,
+  RESIZE_CURSORS,
+  getHandlePositions,
+} from "@/lib/resize-utils";
+import {
+  RotationCorner,
+  getRotationHandlePositions,
+  ROTATION_CURSOR,
+  ROTATION_HANDLE_OFFSET,
+} from "@/lib/rotation-utils";
 
 // =============================================================================
 // TYPES
@@ -11,7 +21,10 @@ import { cn } from "@/lib/utils";
 interface CanvasElementRendererProps {
   element: CanvasElement;
   isSelected: boolean;
+  zoom: number;
   onMouseDown: (e: React.MouseEvent, elementId: string) => void;
+  onResizeStart?: (e: React.MouseEvent, elementId: string, handle: ResizeHandle) => void;
+  onRotateStart?: (e: React.MouseEvent, elementId: string) => void;
 }
 
 // =============================================================================
@@ -21,7 +34,10 @@ interface CanvasElementRendererProps {
 export const CanvasElementRenderer = memo(function CanvasElementRenderer({
   element,
   isSelected,
+  zoom,
   onMouseDown,
+  onResizeStart,
+  onRotateStart,
 }: CanvasElementRendererProps) {
   if (!element.visible) return null;
 
@@ -41,7 +57,6 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
     borderWidth: strokeWidth,
     borderStyle: "solid",
     cursor: locked ? "not-allowed" : "move",
-    // Prevent text selection while dragging
     userSelect: "none",
   };
 
@@ -96,7 +111,7 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
     <div className="contents">
       {renderElement()}
       
-      {/* Selection indicator */}
+      {/* Selection indicator with resize and rotation handles */}
       {isSelected && (
         <SelectionBox
           x={x}
@@ -104,6 +119,11 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
           width={width}
           height={height}
           rotation={rotation}
+          zoom={zoom}
+          locked={locked}
+          elementId={id}
+          onResizeStart={onResizeStart}
+          onRotateStart={onRotateStart}
         />
       )}
     </div>
@@ -111,7 +131,7 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
 });
 
 // =============================================================================
-// SELECTION BOX
+// SELECTION BOX WITH RESIZE AND ROTATION HANDLES
 // =============================================================================
 
 interface SelectionBoxProps {
@@ -120,24 +140,59 @@ interface SelectionBoxProps {
   width: number;
   height: number;
   rotation: number;
+  zoom: number;
+  locked: boolean;
+  elementId: string;
+  onResizeStart?: (e: React.MouseEvent, elementId: string, handle: ResizeHandle) => void;
+  onRotateStart?: (e: React.MouseEvent, elementId: string) => void;
 }
 
-function SelectionBox({ x, y, width, height, rotation }: SelectionBoxProps) {
-  // Handle size
-  const handleSize = 8;
+function SelectionBox({ 
+  x, 
+  y, 
+  width, 
+  height, 
+  rotation, 
+  zoom,
+  locked,
+  elementId,
+  onResizeStart,
+  onRotateStart,
+}: SelectionBoxProps) {
+  const [isHoveringRotation, setIsHoveringRotation] = useState(false);
+  
+  // Handle size should appear constant regardless of zoom
+  const handleSize = 8 / zoom;
   const halfHandle = handleSize / 2;
+  
+  // Border width should also be constant
+  const borderWidth = 2 / zoom;
+  
+  // Rotation handle offset (scaled for zoom)
+  const rotationOffset = ROTATION_HANDLE_OFFSET / zoom;
+  const rotationHandleSize = 12 / zoom;
 
-  // Handle positions (relative to element)
-  const handles = [
-    { id: "nw", cx: 0, cy: 0 },
-    { id: "n", cx: width / 2, cy: 0 },
-    { id: "ne", cx: width, cy: 0 },
-    { id: "e", cx: width, cy: height / 2 },
-    { id: "se", cx: width, cy: height },
-    { id: "s", cx: width / 2, cy: height },
-    { id: "sw", cx: 0, cy: height },
-    { id: "w", cx: 0, cy: height / 2 },
-  ];
+  // Get resize handle positions
+  const resizeHandlePositions = getHandlePositions();
+  const resizeHandles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+
+  // Get rotation handle positions
+  const rotationHandles = getRotationHandlePositions(0, 0, width, height, rotationOffset);
+  const rotationCorners: RotationCorner[] = ["nw", "ne", "sw", "se"];
+
+  const handleResizeMouseDown = (e: React.MouseEvent, handle: ResizeHandle) => {
+    e.stopPropagation();
+    if (!locked && onResizeStart) {
+      onResizeStart(e, elementId, handle);
+    }
+  };
+
+  const handleRotateMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!locked && onRotateStart) {
+      onRotateStart(e, elementId);
+    }
+  };
 
   return (
     <div
@@ -153,28 +208,73 @@ function SelectionBox({ x, y, width, height, rotation }: SelectionBoxProps) {
     >
       {/* Selection border */}
       <div
-        className="absolute inset-0 border-2 border-accent rounded-sm"
-        style={{ margin: -1 }}
+        className="absolute bg-transparent"
+        style={{
+          inset: -borderWidth / 2,
+          border: `${borderWidth}px solid #3b82f6`,
+          borderRadius: 2 / zoom,
+        }}
       />
 
-      {/* Resize handles */}
-      {handles.map((handle) => (
+      {/* Center dot (visible when hovering rotation handles) */}
+      {isHoveringRotation && (
         <div
-          key={handle.id}
-          className="absolute bg-white border-2 border-accent rounded-sm pointer-events-auto cursor-pointer"
+          className="absolute bg-accent rounded-full"
           style={{
-            width: handleSize,
-            height: handleSize,
-            left: handle.cx - halfHandle,
-            top: handle.cy - halfHandle,
-          }}
-          // Resize would be handled here in a full implementation
-          onMouseDown={(e) => {
-            e.stopPropagation();
-            console.log(`Resize handle ${handle.id} clicked`);
+            width: 6 / zoom,
+            height: 6 / zoom,
+            left: width / 2 - 3 / zoom,
+            top: height / 2 - 3 / zoom,
           }}
         />
-      ))}
+      )}
+
+      {/* Rotation handles (invisible hit areas at corners, outside the element) */}
+      {!locked && rotationCorners.map((corner) => {
+        const pos = rotationHandles[corner];
+        
+        return (
+          <div
+            key={`rotate-${corner}`}
+            className="absolute pointer-events-auto"
+            style={{
+              width: rotationHandleSize,
+              height: rotationHandleSize,
+              left: pos.x - rotationHandleSize / 2,
+              top: pos.y - rotationHandleSize / 2,
+              cursor: ROTATION_CURSOR,
+              // Debug: uncomment to see rotation handle areas
+              // backgroundColor: "rgba(255, 0, 0, 0.2)",
+            }}
+            onMouseDown={handleRotateMouseDown}
+            onMouseEnter={() => setIsHoveringRotation(true)}
+            onMouseLeave={() => setIsHoveringRotation(false)}
+          />
+        );
+      })}
+
+      {/* Resize handles */}
+      {!locked && resizeHandles.map((handle) => {
+        const pos = resizeHandlePositions[handle];
+        const cursor = RESIZE_CURSORS[handle];
+        
+        return (
+          <div
+            key={handle}
+            className="absolute bg-white pointer-events-auto"
+            style={{
+              width: handleSize,
+              height: handleSize,
+              left: pos.x * width - halfHandle,
+              top: pos.y * height - halfHandle,
+              border: `${borderWidth}px solid #3b82f6`,
+              borderRadius: 1 / zoom,
+              cursor: cursor,
+            }}
+            onMouseDown={(e) => handleResizeMouseDown(e, handle)}
+          />
+        );
+      })}
     </div>
   );
 }
