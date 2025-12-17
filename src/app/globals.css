@@ -83,9 +83,16 @@ body {
   color: white;
 }
 
-/* Smooth transitions */
-* {
-  transition-property: background-color, border-color, color, opacity, transform;
+/* Smooth transitions - only for color changes, not positioning */
+.transition-colors {
+  transition-property: background-color, border-color, color, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Remove problematic global transition - apply only where explicitly needed */
+button, a, input, select, textarea {
+  transition-property: background-color, border-color, color, opacity;
   transition-duration: 150ms;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }

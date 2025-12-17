@@ -5,7 +5,7 @@ import {
   Square,
   Circle,
   Type,
-  Image,
+  Image as ImageIcon,
   Frame,
   GripVertical,
   X,
@@ -72,7 +72,7 @@ const paletteItems: DragItem[] = [
     id: "image",
     type: "image",
     label: "Image",
-    icon: <Image className="w-5 h-5" />,
+    icon: <ImageIcon className="w-5 h-5" />,
     defaultWidth: 200,
     defaultHeight: 150,
   },
@@ -105,8 +105,7 @@ interface DragPaletteProps {
 }
 
 export function DragPalette({ isVisible, onClose }: DragPaletteProps) {
-  // Position state (window coordinates, using left/top)
-  // Start near top-right corner
+  // Position state (window coordinates, using left/top) - lazy initialized on client
   const [position, setPosition] = useState<Position>(() => ({
     x: typeof window !== 'undefined' ? window.innerWidth - 176 : 0,
     y: 60,
@@ -164,6 +163,7 @@ export function DragPalette({ isVisible, onClose }: DragPaletteProps) {
     };
   }, [isDraggingPalette]);
 
+  // Don't render if not visible
   if (!isVisible) return null;
 
   return (
