@@ -13,7 +13,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
           <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
             <span className="text-sm font-bold text-surface0">CF</span>
           </div>
-          <span className="font-semibold">CanvasForge</span>
+          <span className="font-semibold">Figgy Pudding</span>
         </Link>
       </header>
 
@@ -26,7 +26,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
 
       {/* Simple footer */}
       <footer className="p-6 text-center text-sm text-text-muted">
-        <p>© 2024 CanvasForge. All rights reserved.</p>
+        <p>© 2024 Figgy Pudding. All rights reserved.</p>
       </footer>
     </div>
   );

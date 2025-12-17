@@ -38,7 +38,7 @@ export default function LoginPage() {
   return (
     <AuthCard
       title="Welcome back"
-      description="Sign in to your CanvasForge account"
+      description="Sign in to your Figgy Pudding account"
       footer={
         <span className="text-text-secondary">
           Don&apos;t have an account?{" "}

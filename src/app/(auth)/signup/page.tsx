@@ -54,7 +54,7 @@ export default function SignupPage() {
   return (
     <AuthCard
       title="Create an account"
-      description="Start designing with CanvasForge today"
+      description="Start designing with Figgy Pudding today"
       footer={
         <span className="text-text-secondary">
           Already have an account?{" "}

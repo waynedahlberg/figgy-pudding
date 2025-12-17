@@ -1,4 +1,4 @@
-# CanvasForge Quick Reference
+# Figgy Pudding Quick Reference
 
 ## Layout Patterns
 

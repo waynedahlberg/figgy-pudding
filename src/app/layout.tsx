@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Longhorn Canvas Demo",
-  description: "Longhorn Canvas Demo",
+  title: "Figgy Pudding",
+  description: "Figgy Pudding",
 };
 
 export default function RootLayout({

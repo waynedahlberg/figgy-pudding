@@ -25,7 +25,7 @@ export default function AppearanceSettingsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-text-primary">Appearance</h1>
         <p className="text-sm text-text-secondary mt-1">
-          Customize how CanvasForge looks on your device
+          Customize how Figgy Pudding looks on your device
         </p>
       </div>
 

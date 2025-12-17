@@ -404,7 +404,7 @@ export function WelcomeToast({ isVisible, onDismiss }: WelcomeToastProps) {
         </div>
         <div>
           <p className="text-sm font-medium text-text-primary">
-            Welcome to CanvasForge!
+            Welcome to Figgy Pudding!
           </p>
           <p className="text-xs text-text-secondary">
             Press <kbd className="px-1 py-0.5 bg-surface2 rounded">⌘K</kbd> to add elements or drag from the palette

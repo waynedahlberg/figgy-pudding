@@ -1,4 +1,4 @@
-# CanvasForge - Next.js Application UI Tutorial
+# Figgy Pudding - Next.js Application UI Tutorial
 
 A complete design tool interface built with Next.js 15, React 19, and Tailwind CSS 4.
 
