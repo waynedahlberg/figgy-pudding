@@ -5,8 +5,17 @@ import {
   useContext,
   useState,
   useCallback,
+  useRef,
+  useEffect,
   ReactNode,
 } from "react";
+import {
+  easings,
+  lerp,
+  calculateZoomAnimationTarget,
+  ZOOM_ANIMATION_DURATION,
+  RESET_VIEW_ANIMATION_DURATION,
+} from "@/lib/animation-utils";
 
 // =============================================================================
 // TYPES
@@ -28,6 +37,18 @@ export interface CanvasElement {
   visible: boolean;
 }
 
+interface AnimationState {
+  isAnimating: boolean;
+  startTime: number;
+  duration: number;
+  startPanX: number;
+  startPanY: number;
+  startZoom: number;
+  endPanX: number;
+  endPanY: number;
+  endZoom: number;
+}
+
 interface CanvasState {
   // Viewport
   panX: number;
@@ -40,6 +61,7 @@ interface CanvasState {
   snapToGrid: boolean;
   gridSize: number;
   showGrid: boolean;
+  showRulers: boolean;
 }
 
 interface CanvasStore extends CanvasState {
@@ -52,6 +74,11 @@ interface CanvasStore extends CanvasState {
   zoomOut: (centerX?: number, centerY?: number) => void;
   resetView: () => void;
   fitToScreen: () => void;
+  // Animated zoom actions
+  animateZoomTo: (newZoom: number, centerX: number, centerY: number) => void;
+  animateZoomIn: (centerX?: number, centerY?: number) => void;
+  animateZoomOut: (centerX?: number, centerY?: number) => void;
+  animateResetView: () => void;
   // Element actions
   addElement: (element: Omit<CanvasElement, "id">) => string;
   updateElement: (id: string, updates: Partial<CanvasElement>) => void;
@@ -67,6 +94,8 @@ interface CanvasStore extends CanvasState {
   setGridSize: (size: number) => void;
   setShowGrid: (show: boolean) => void;
   toggleShowGrid: () => void;
+  setShowRulers: (show: boolean) => void;
+  toggleShowRulers: () => void;
   // Helpers
   getSelectedElements: () => CanvasElement[];
   getElementById: (id: string) => CanvasElement | undefined;
@@ -85,12 +114,12 @@ export const DEFAULT_GRID_SIZE = 20;
 
 // Default colors for new elements
 const ELEMENT_COLORS = [
-  { fill: "rgba(99, 102, 241, 0.2)", stroke: "rgb(99, 102, 241)" },   // Indigo
-  { fill: "rgba(236, 72, 153, 0.2)", stroke: "rgb(236, 72, 153)" },   // Pink
-  { fill: "rgba(34, 197, 94, 0.2)", stroke: "rgb(34, 197, 94)" },     // Green
-  { fill: "rgba(249, 115, 22, 0.2)", stroke: "rgb(249, 115, 22)" },   // Orange
-  { fill: "rgba(14, 165, 233, 0.2)", stroke: "rgb(14, 165, 233)" },   // Sky
-  { fill: "rgba(168, 85, 247, 0.2)", stroke: "rgb(168, 85, 247)" },   // Purple
+  { fill: "rgba(99, 102, 241, 0.2)", stroke: "rgb(99, 102, 241)" },
+  { fill: "rgba(236, 72, 153, 0.2)", stroke: "rgb(236, 72, 153)" },
+  { fill: "rgba(34, 197, 94, 0.2)", stroke: "rgb(34, 197, 94)" },
+  { fill: "rgba(249, 115, 22, 0.2)", stroke: "rgb(249, 115, 22)" },
+  { fill: "rgba(14, 165, 233, 0.2)", stroke: "rgb(14, 165, 233)" },
+  { fill: "rgba(168, 85, 247, 0.2)", stroke: "rgb(168, 85, 247)" },
 ];
 
 // Initial sample elements
@@ -163,10 +192,10 @@ const initialState: CanvasState = {
   zoom: 1,
   elements: initialElements,
   selectedIds: [],
-  // Settings
   snapToGrid: false,
   gridSize: DEFAULT_GRID_SIZE,
   showGrid: true,
+  showRulers: false,
 };
 
 // =============================================================================
@@ -191,11 +220,95 @@ function generateId(): string {
 export function CanvasProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CanvasState>(initialState);
 
+  // Animation state (kept in ref to avoid re-renders during animation)
+  const animationRef = useRef<AnimationState | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
   // ---------------------------------------------------------------------------
-  // VIEWPORT ACTIONS
+  // ANIMATION LOOP
+  // ---------------------------------------------------------------------------
+
+  // Use ref for the animation function to avoid circular dependency
+  const animationLoopRef = useRef<() => void>(() => { });
+
+  useEffect(() => {
+    animationLoopRef.current = () => {
+      const anim = animationRef.current;
+      if (!anim || !anim.isAnimating) return;
+
+      const now = performance.now();
+      const elapsed = now - anim.startTime;
+      const progress = Math.min(elapsed / anim.duration, 1);
+      const easedProgress = easings.easeOutExpo(progress);
+
+      const currentPanX = lerp(anim.startPanX, anim.endPanX, easedProgress);
+      const currentPanY = lerp(anim.startPanY, anim.endPanY, easedProgress);
+      const currentZoom = lerp(anim.startZoom, anim.endZoom, easedProgress);
+
+      setState((prev) => ({
+        ...prev,
+        panX: currentPanX,
+        panY: currentPanY,
+        zoom: currentZoom,
+      }));
+
+      if (progress < 1) {
+        animationFrameRef.current = requestAnimationFrame(() => animationLoopRef.current?.());
+      } else {
+        // Animation complete
+        animationRef.current = null;
+      }
+    };
+  });
+
+  // Cleanup animation on unmount
+  useEffect(() => {
+    return () => {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // START ANIMATION HELPER
+  // ---------------------------------------------------------------------------
+
+  const startAnimation = useCallback(
+    (endPanX: number, endPanY: number, endZoom: number, duration: number) => {
+      // Cancel any existing animation
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+
+      // Start new animation
+      animationRef.current = {
+        isAnimating: true,
+        startTime: performance.now(),
+        duration,
+        startPanX: state.panX,
+        startPanY: state.panY,
+        startZoom: state.zoom,
+        endPanX,
+        endPanY,
+        endZoom,
+      };
+
+      animationFrameRef.current = requestAnimationFrame(() => animationLoopRef.current?.());
+    },
+    [state.panX, state.panY, state.zoom]
+  );
+
+  // ---------------------------------------------------------------------------
+  // VIEWPORT ACTIONS (non-animated)
   // ---------------------------------------------------------------------------
 
   const setPan = useCallback((x: number, y: number) => {
+    // Cancel any running animation
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationRef.current = null;
+    }
     setState((prev) => ({ ...prev, panX: x, panY: y }));
   }, []);
 
@@ -208,6 +321,11 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setZoom = useCallback((zoom: number) => {
+    // Cancel any running animation
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationRef.current = null;
+    }
     const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
     setState((prev) => ({ ...prev, zoom: clampedZoom }));
   }, []);
@@ -260,6 +378,62 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ---------------------------------------------------------------------------
+  // ANIMATED VIEWPORT ACTIONS
+  // ---------------------------------------------------------------------------
+
+  const animateZoomTo = useCallback(
+    (newZoom: number, centerX: number, centerY: number) => {
+      const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
+      const target = calculateZoomAnimationTarget(
+        state.panX,
+        state.panY,
+        state.zoom,
+        clampedZoom,
+        centerX,
+        centerY
+      );
+      startAnimation(target.panX, target.panY, target.zoom, ZOOM_ANIMATION_DURATION);
+    },
+    [state.panX, state.panY, state.zoom, startAnimation]
+  );
+
+  const animateZoomIn = useCallback(
+    (centerX?: number, centerY?: number) => {
+      const nextLevel = ZOOM_LEVELS.find((level) => level > state.zoom) ?? MAX_ZOOM;
+      // Use screen center if no point specified
+      const cx = centerX ?? 0;
+      const cy = centerY ?? 0;
+
+      if (centerX !== undefined && centerY !== undefined) {
+        animateZoomTo(nextLevel, cx, cy);
+      } else {
+        // Zoom without centering - just animate zoom value
+        startAnimation(state.panX, state.panY, nextLevel, ZOOM_ANIMATION_DURATION);
+      }
+    },
+    [state.zoom, state.panX, state.panY, animateZoomTo, startAnimation]
+  );
+
+  const animateZoomOut = useCallback(
+    (centerX?: number, centerY?: number) => {
+      const prevLevel = [...ZOOM_LEVELS].reverse().find((level) => level < state.zoom) ?? MIN_ZOOM;
+      const cx = centerX ?? 0;
+      const cy = centerY ?? 0;
+
+      if (centerX !== undefined && centerY !== undefined) {
+        animateZoomTo(prevLevel, cx, cy);
+      } else {
+        startAnimation(state.panX, state.panY, prevLevel, ZOOM_ANIMATION_DURATION);
+      }
+    },
+    [state.zoom, state.panX, state.panY, animateZoomTo, startAnimation]
+  );
+
+  const animateResetView = useCallback(() => {
+    startAnimation(0, 0, 1, RESET_VIEW_ANIMATION_DURATION);
+  }, [startAnimation]);
+
+  // ---------------------------------------------------------------------------
   // ELEMENT ACTIONS
   // ---------------------------------------------------------------------------
 
@@ -269,7 +443,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({
       ...prev,
       elements: [...prev.elements, newElement],
-      selectedIds: [id], // Select the new element
+      selectedIds: [id],
     }));
     return id;
   }, []);
@@ -309,7 +483,6 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   const selectElement = useCallback((id: string, addToSelection = false) => {
     setState((prev) => {
       if (addToSelection) {
-        // Toggle selection when shift-clicking
         const isSelected = prev.selectedIds.includes(id);
         return {
           ...prev,
@@ -318,7 +491,6 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
             : [...prev.selectedIds, id],
         };
       }
-      // Single select
       return { ...prev, selectedIds: [id] };
     });
   }, []);
@@ -356,6 +528,14 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
 
   const toggleShowGrid = useCallback(() => {
     setState((prev) => ({ ...prev, showGrid: !prev.showGrid }));
+  }, []);
+
+  const setShowRulers = useCallback((show: boolean) => {
+    setState((prev) => ({ ...prev, showRulers: show }));
+  }, []);
+
+  const toggleShowRulers = useCallback(() => {
+    setState((prev) => ({ ...prev, showRulers: !prev.showRulers }));
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -404,6 +584,10 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     zoomOut,
     resetView,
     fitToScreen,
+    animateZoomTo,
+    animateZoomIn,
+    animateZoomOut,
+    animateResetView,
     addElement,
     updateElement,
     deleteElements,
@@ -416,6 +600,8 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     setGridSize,
     setShowGrid,
     toggleShowGrid,
+    setShowRulers,
+    toggleShowRulers,
     getSelectedElements,
     getElementById,
     screenToCanvas,

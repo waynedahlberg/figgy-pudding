@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { InfiniteCanvas } from "@/components/canvas/infinite-canvas";
 import { CommandMenu } from "@/components/canvas/command-menu";
 import { DragPalette } from "@/components/canvas/drag-palette";
+import { Rulers, RULER_SIZE } from "@/components/canvas/rulers";
 import {
   ShortcutsPanel,
   SelectionInfoBar,
@@ -27,7 +28,11 @@ import {
 
 export default function CanvasPage() {
   const { isPaletteVisible, setIsPaletteVisible } = usePaletteVisibility();
-  const { selectedIds, elements, updateElement, deleteElements } = useCanvasStore();
+  const { selectedIds, elements, showRulers, updateElement, deleteElements } = useCanvasStore();
+  
+  // Container ref for measuring
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   
   // UI state
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -38,10 +43,29 @@ export default function CanvasPage() {
     isOpen: isContextMenuOpen,
     x: contextMenuX,
     y: contextMenuY,
-    targetId: contextMenuTargetId,
     openContextMenu,
     closeContextMenu,
   } = useContextMenu();
+
+  // Measure container size for rulers
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      setContainerSize({
+        width: container.offsetWidth,
+        height: container.offsetHeight,
+      });
+    };
+
+    updateSize();
+
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, []);
 
   // Keyboard shortcut for help panel
   useEffect(() => {
@@ -163,9 +187,26 @@ export default function CanvasPage() {
   );
 
   return (
-    <div onContextMenu={handleContextMenu} className="w-full h-full">
-      {/* Main Canvas */}
-      <InfiniteCanvas />
+    <div 
+      ref={containerRef}
+      onContextMenu={handleContextMenu} 
+      className="w-full h-full relative"
+    >
+      {/* Rulers */}
+      <Rulers width={containerSize.width} height={containerSize.height} />
+
+      {/* Main Canvas - offset when rulers are shown */}
+      <div
+        className="absolute"
+        style={{
+          top: showRulers ? RULER_SIZE : 0,
+          left: showRulers ? RULER_SIZE : 0,
+          right: 0,
+          bottom: 0,
+        }}
+      >
+        <InfiniteCanvas />
+      </div>
 
       {/* Command Menu (⌘K) */}
       <CommandMenu />

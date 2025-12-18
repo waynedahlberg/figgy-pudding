@@ -17,29 +17,31 @@ import { cn } from "@/lib/utils";
 // =============================================================================
 
 export function BottomToolbar() {
-  // Canvas store - now includes snap and grid settings
+  // Canvas store - includes animated zoom actions
   const {
     zoom,
     panX,
     panY,
     snapToGrid: snapEnabled,
     showGrid,
+    showRulers,
     gridSize,
-    zoomIn,
-    zoomOut,
+    animateZoomIn,
+    animateZoomOut,
+    animateResetView,
     setZoom,
-    fitToScreen,
     toggleSnapToGrid,
     toggleShowGrid,
+    toggleShowRulers,
   } = useCanvasStore();
 
-  // Handle zoom dropdown change
+  // Handle zoom dropdown change (instant, no animation)
   const handleZoomChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newZoom = parseFloat(e.target.value);
     setZoom(newZoom);
   };
 
-  // Format zoom for display (e.g., 1 -> "100%")
+  // Format zoom for display
   const zoomPercent = Math.round(zoom * 100);
 
   return (
@@ -67,8 +69,8 @@ export function BottomToolbar() {
           icon={<Ruler className="w-3.5 h-3.5" />}
           label="Rulers"
           shortcut="⇧R"
-          isActive={false}
-          onClick={() => {}} // Placeholder for rulers module
+          isActive={showRulers}
+          onClick={toggleShowRulers}
         />
         <ViewToggle
           icon={<Magnet className="w-3.5 h-3.5" />}
@@ -81,15 +83,15 @@ export function BottomToolbar() {
 
       {/* ============ RIGHT SECTION - Zoom Controls ============ */}
       <div className="flex items-center gap-1 min-w-[180px] justify-end">
-        {/* Zoom Out */}
+        {/* Zoom Out - animated */}
         <ZoomButton
           icon={<ZoomOut className="w-3.5 h-3.5" />}
           label="Zoom out (⌘-)"
-          onClick={() => zoomOut()}
+          onClick={() => animateZoomOut()}
           disabled={zoom <= MIN_ZOOM}
         />
 
-        {/* Zoom Dropdown */}
+        {/* Zoom Dropdown - instant */}
         <select
           value={zoom}
           onChange={handleZoomChange}
@@ -112,22 +114,22 @@ export function BottomToolbar() {
           )}
         </select>
 
-        {/* Zoom In */}
+        {/* Zoom In - animated */}
         <ZoomButton
           icon={<ZoomIn className="w-3.5 h-3.5" />}
           label="Zoom in (⌘+)"
-          onClick={() => zoomIn()}
+          onClick={() => animateZoomIn()}
           disabled={zoom >= MAX_ZOOM}
         />
 
         {/* Divider */}
         <div className="w-px h-4 bg-border-subtle mx-1" />
 
-        {/* Fit to Screen */}
+        {/* Fit to Screen / Reset View - animated */}
         <ZoomButton
           icon={<Maximize className="w-3.5 h-3.5" />}
-          label="Fit to screen (⌘0)"
-          onClick={fitToScreen}
+          label="Reset view (⌘0)"
+          onClick={animateResetView}
         />
       </div>
     </div>

@@ -14,8 +14,6 @@ import {
   handleWheelEvent,
   shouldStartPan,
   getPanCursor,
-  stepZoomIn,
-  stepZoomOut,
 } from "@/lib/pan-zoom-utils";
 import {
   calculateAngle,
@@ -45,11 +43,9 @@ interface DragState {
   startPanX: number;
   startPanY: number;
   elementStartPositions: Map<string, { x: number; y: number }>;
-  // Resize-specific state
   resizeElementId: string | null;
   resizeHandle: ResizeHandle | null;
   resizeStartBounds: ElementBounds | null;
-  // Rotate-specific state
   rotateElementId: string | null;
   rotateStartAngle: number;
   rotateElementStartRotation: number;
@@ -61,10 +57,8 @@ interface DragState {
 // =============================================================================
 
 export function InfiniteCanvas() {
-  // Refs
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Canvas store
   const {
     panX,
     panY,
@@ -76,16 +70,18 @@ export function InfiniteCanvas() {
     showGrid,
     setPan,
     setZoom,
+    // Use animated versions for keyboard shortcuts
+    animateZoomIn,
+    animateZoomOut,
+    animateResetView,
     selectElement,
     deselectAll,
     updateElement,
     deleteElements,
   } = useCanvasStore();
 
-  // Drag and drop from palette
   const { isDragOver, handleDragOver, handleDragLeave, handleDrop } = useCanvasDrop();
 
-  // Local state
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
     mode: null,
@@ -109,7 +105,7 @@ export function InfiniteCanvas() {
   });
 
   // =============================================================================
-  // KEYBOARD SHORTCUTS
+  // KEYBOARD SHORTCUTS (with animated zoom)
   // =============================================================================
 
   useEffect(() => {
@@ -135,6 +131,7 @@ export function InfiniteCanvas() {
         deselectAll();
       }
 
+      // Animated zoom shortcuts
       if (e.metaKey || e.ctrlKey) {
         const container = containerRef.current;
         const rect = container?.getBoundingClientRect();
@@ -143,18 +140,13 @@ export function InfiniteCanvas() {
 
         if (e.key === "=" || e.key === "+") {
           e.preventDefault();
-          const result = stepZoomIn(panX, panY, zoom, centerX, centerY);
-          setPan(result.panX, result.panY);
-          setZoom(result.zoom);
+          animateZoomIn(centerX, centerY);
         } else if (e.key === "-") {
           e.preventDefault();
-          const result = stepZoomOut(panX, panY, zoom, centerX, centerY);
-          setPan(result.panX, result.panY);
-          setZoom(result.zoom);
+          animateZoomOut(centerX, centerY);
         } else if (e.key === "0") {
           e.preventDefault();
-          setPan(0, 0);
-          setZoom(1);
+          animateResetView();
         }
       }
     };
@@ -174,7 +166,7 @@ export function InfiniteCanvas() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedIds, deleteElements, deselectAll, panX, panY, zoom, setPan, setZoom]);
+  }, [selectedIds, deleteElements, deselectAll, animateZoomIn, animateZoomOut, animateResetView]);
 
   // =============================================================================
   // CANVAS MOUSE HANDLERS
@@ -211,7 +203,7 @@ export function InfiniteCanvas() {
   );
 
   // =============================================================================
-  // ELEMENT MOUSE DOWN (for moving)
+  // ELEMENT MOUSE DOWN
   // =============================================================================
 
   const handleElementMouseDown = useCallback(
@@ -390,7 +382,6 @@ export function InfiniteCanvas() {
           let newX = startPos.x + canvasDeltaX;
           let newY = startPos.y + canvasDeltaY;
 
-          // Apply grid snapping if enabled
           if (snapEnabled) {
             newX = snapToGrid(newX, gridSize);
             newY = snapToGrid(newY, gridSize);
@@ -421,7 +412,6 @@ export function InfiniteCanvas() {
           }
         );
 
-        // Apply grid snapping to resize if enabled
         if (snapEnabled) {
           newBounds = applySnapToResize(newBounds, gridSize, true);
         }
@@ -447,7 +437,6 @@ export function InfiniteCanvas() {
         const rotationDelta = calculateRotationDelta(dragState.rotateStartAngle, currentAngle);
         let newRotation = dragState.rotateElementStartRotation + rotationDelta;
 
-        // Snap to 15° increments when shift is held
         if (e.shiftKey) {
           newRotation = snapAngle(newRotation, 15);
         }
@@ -497,7 +486,7 @@ export function InfiniteCanvas() {
   }, [dragState.isDragging]);
 
   // =============================================================================
-  // WHEEL HANDLER
+  // WHEEL HANDLER (non-animated for smooth continuous zoom)
   // =============================================================================
 
   const handleWheel = useCallback(
@@ -655,7 +644,7 @@ export function InfiniteCanvas() {
         ))}
       </div>
 
-      {/* Drop indicator overlay */}
+      {/* Drop indicator */}
       {isDragOver && (
         <div className="absolute inset-0 bg-accent/5 pointer-events-none flex items-center justify-center">
           <div className="bg-surface1/90 backdrop-blur-sm rounded-lg border border-accent px-4 py-2 text-sm font-medium text-accent">
