@@ -22,13 +22,31 @@ import {
   EyeOff,
   Lock,
   Unlock,
+  ArrowUpToLine,
+  ArrowDownToLine,
   ArrowUp,
   ArrowDown,
+  Group,
+  Ungroup,
 } from "lucide-react";
 
 export default function CanvasPage() {
   const { isPaletteVisible, setIsPaletteVisible } = usePaletteVisibility();
-  const { selectedIds, elements, showRulers, updateElement, deleteElements } = useCanvasStore();
+  const {
+    selectedIds,
+    elements,
+    showRulers,
+    updateElement,
+    deleteElements,
+    bringToFront,
+    sendToBack,
+    bringForward,
+    sendBackward,
+    groupSelected,
+    ungroupSelected,
+    canGroupSelection,
+    canUngroupSelection,
+  } = useCanvasStore();
   
   // Container ref for measuring
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,7 +85,7 @@ export default function CanvasPage() {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Keyboard shortcut for help panel
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -82,11 +100,60 @@ export default function CanvasPage() {
         e.preventDefault();
         setShowShortcuts((prev) => !prev);
       }
+
+      // Grouping shortcuts
+      if ((e.metaKey || e.ctrlKey) && e.key === "g" && !e.shiftKey) {
+        e.preventDefault();
+        if (canGroupSelection()) {
+          groupSelected();
+        }
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "g") {
+        e.preventDefault();
+        if (canUngroupSelection()) {
+          ungroupSelected();
+        }
+      }
+
+      // Z-ordering shortcuts
+      if (selectedIds.length > 0) {
+        // ] = Bring Forward
+        if (e.key === "]" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          bringForward();
+        }
+        // [ = Send Backward
+        if (e.key === "[" && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          sendBackward();
+        }
+        // ⌘] = Bring to Front
+        if (e.key === "]" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          bringToFront();
+        }
+        // ⌘[ = Send to Back
+        if (e.key === "[" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          sendToBack();
+        }
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [
+    selectedIds,
+    bringToFront,
+    sendToBack,
+    bringForward,
+    sendBackward,
+    groupSelected,
+    ungroupSelected,
+    canGroupSelection,
+    canUngroupSelection,
+  ]);
 
   // Build context menu items based on selection
   const getContextMenuItems = useCallback(() => {
@@ -94,6 +161,17 @@ export default function CanvasPage() {
     const selectedElements = elements.filter((el) => selectedIds.includes(el.id));
     const allVisible = selectedElements.every((el) => el.visible);
     const allLocked = selectedElements.every((el) => el.locked);
+
+    // Check z-order position
+    const selectedIndices = elements
+      .map((el, i) => (selectedIds.includes(el.id) ? i : -1))
+      .filter((i) => i !== -1);
+    const canBringForward = hasSelection && Math.max(...selectedIndices) < elements.length - 1;
+    const canSendBackward = hasSelection && Math.min(...selectedIndices) > 0;
+
+    // Check grouping ability
+    const canGroup = canGroupSelection();
+    const canUngroup = canUngroupSelection();
 
     return [
       {
@@ -114,6 +192,66 @@ export default function CanvasPage() {
       },
       {
         id: "divider-1",
+        label: "",
+        divider: true,
+        action: () => {},
+      },
+      {
+        id: "group",
+        label: "Group",
+        icon: <Group className="w-3.5 h-3.5" />,
+        shortcut: "⌘G",
+        action: groupSelected,
+        disabled: !canGroup,
+      },
+      {
+        id: "ungroup",
+        label: "Ungroup",
+        icon: <Ungroup className="w-3.5 h-3.5" />,
+        shortcut: "⌘⇧G",
+        action: ungroupSelected,
+        disabled: !canUngroup,
+      },
+      {
+        id: "divider-2",
+        label: "",
+        divider: true,
+        action: () => {},
+      },
+      {
+        id: "bring-to-front",
+        label: "Bring to Front",
+        icon: <ArrowUpToLine className="w-3.5 h-3.5" />,
+        shortcut: "⌘]",
+        action: bringToFront,
+        disabled: !canBringForward,
+      },
+      {
+        id: "bring-forward",
+        label: "Bring Forward",
+        icon: <ArrowUp className="w-3.5 h-3.5" />,
+        shortcut: "]",
+        action: bringForward,
+        disabled: !canBringForward,
+      },
+      {
+        id: "send-backward",
+        label: "Send Backward",
+        icon: <ArrowDown className="w-3.5 h-3.5" />,
+        shortcut: "[",
+        action: sendBackward,
+        disabled: !canSendBackward,
+      },
+      {
+        id: "send-to-back",
+        label: "Send to Back",
+        icon: <ArrowDownToLine className="w-3.5 h-3.5" />,
+        shortcut: "⌘[",
+        action: sendToBack,
+        disabled: !canSendBackward,
+      },
+      {
+        id: "divider-3",
         label: "",
         divider: true,
         action: () => {},
@@ -141,27 +279,7 @@ export default function CanvasPage() {
         disabled: !hasSelection,
       },
       {
-        id: "divider-2",
-        label: "",
-        divider: true,
-        action: () => {},
-      },
-      {
-        id: "bring-forward",
-        label: "Bring Forward",
-        icon: <ArrowUp className="w-3.5 h-3.5" />,
-        action: () => console.log("Bring forward"),
-        disabled: !hasSelection,
-      },
-      {
-        id: "send-backward",
-        label: "Send Backward",
-        icon: <ArrowDown className="w-3.5 h-3.5" />,
-        action: () => console.log("Send backward"),
-        disabled: !hasSelection,
-      },
-      {
-        id: "divider-3",
+        id: "divider-4",
         label: "",
         divider: true,
         action: () => {},
@@ -176,7 +294,20 @@ export default function CanvasPage() {
         danger: true,
       },
     ];
-  }, [selectedIds, elements, updateElement, deleteElements]);
+  }, [
+    selectedIds,
+    elements,
+    updateElement,
+    deleteElements,
+    bringToFront,
+    sendToBack,
+    bringForward,
+    sendBackward,
+    groupSelected,
+    ungroupSelected,
+    canGroupSelection,
+    canUngroupSelection,
+  ]);
 
   // Handle right-click on canvas
   const handleContextMenu = useCallback(

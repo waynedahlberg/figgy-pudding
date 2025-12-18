@@ -16,6 +16,19 @@ import {
   ZOOM_ANIMATION_DURATION,
   RESET_VIEW_ANIMATION_DURATION,
 } from "@/lib/animation-utils";
+import {
+  bringToFront,
+  sendToBack,
+  bringForward,
+  sendBackward,
+} from "@/lib/z-order-utils";
+import {
+  calculateBoundingBox,
+  makePositionsRelative,
+  makePositionsAbsolute,
+  canGroup,
+  canUngroup,
+} from "@/lib/group-utils";
 
 // =============================================================================
 // TYPES
@@ -23,7 +36,7 @@ import {
 
 export interface CanvasElement {
   id: string;
-  type: "rectangle" | "ellipse" | "text" | "image" | "frame";
+  type: "rectangle" | "ellipse" | "text" | "image" | "frame" | "group";
   x: number;
   y: number;
   width: number;
@@ -35,6 +48,8 @@ export interface CanvasElement {
   name: string;
   locked: boolean;
   visible: boolean;
+  // Group-specific properties
+  childIds?: string[];
 }
 
 interface AnimationState {
@@ -57,6 +72,8 @@ interface CanvasState {
   // Elements
   elements: CanvasElement[];
   selectedIds: string[];
+  // Group children storage (childId -> parent group element's children with relative positions)
+  groupChildren: Map<string, CanvasElement[]>;
   // Settings
   snapToGrid: boolean;
   gridSize: number;
@@ -84,6 +101,16 @@ interface CanvasStore extends CanvasState {
   updateElement: (id: string, updates: Partial<CanvasElement>) => void;
   deleteElements: (ids: string[]) => void;
   moveElements: (ids: string[], deltaX: number, deltaY: number) => void;
+  // Z-order actions
+  bringToFront: () => void;
+  sendToBack: () => void;
+  bringForward: () => void;
+  sendBackward: () => void;
+  // Group actions
+  groupSelected: () => void;
+  ungroupSelected: () => void;
+  canGroupSelection: () => boolean;
+  canUngroupSelection: () => boolean;
   // Selection actions
   selectElement: (id: string, addToSelection?: boolean) => void;
   deselectAll: () => void;
@@ -192,6 +219,7 @@ const initialState: CanvasState = {
   zoom: 1,
   elements: initialElements,
   selectedIds: [],
+  groupChildren: new Map(),
   snapToGrid: false,
   gridSize: DEFAULT_GRID_SIZE,
   showGrid: true,
@@ -220,17 +248,15 @@ function generateId(): string {
 export function CanvasProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CanvasState>(initialState);
 
-  // Animation state (kept in ref to avoid re-renders during animation)
   const animationRef = useRef<AnimationState | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const animationLoopRef = useRef<(() => void) | null>(null);
 
   // ---------------------------------------------------------------------------
   // ANIMATION LOOP
   // ---------------------------------------------------------------------------
 
-  // Use ref for the animation function to avoid circular dependency
-  const animationLoopRef = useRef<() => void>(() => { });
-
+  // Update the animation loop function
   useEffect(() => {
     animationLoopRef.current = () => {
       const anim = animationRef.current;
@@ -255,13 +281,11 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
       if (progress < 1) {
         animationFrameRef.current = requestAnimationFrame(() => animationLoopRef.current?.());
       } else {
-        // Animation complete
         animationRef.current = null;
       }
     };
   });
 
-  // Cleanup animation on unmount
   useEffect(() => {
     return () => {
       if (animationFrameRef.current !== null) {
@@ -270,18 +294,12 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ---------------------------------------------------------------------------
-  // START ANIMATION HELPER
-  // ---------------------------------------------------------------------------
-
   const startAnimation = useCallback(
     (endPanX: number, endPanY: number, endZoom: number, duration: number) => {
-      // Cancel any existing animation
       if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);
       }
 
-      // Start new animation
       animationRef.current = {
         isAnimating: true,
         startTime: performance.now(),
@@ -300,11 +318,10 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   );
 
   // ---------------------------------------------------------------------------
-  // VIEWPORT ACTIONS (non-animated)
+  // VIEWPORT ACTIONS
   // ---------------------------------------------------------------------------
 
   const setPan = useCallback((x: number, y: number) => {
-    // Cancel any running animation
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(animationFrameRef.current);
       animationRef.current = null;
@@ -321,7 +338,6 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setZoom = useCallback((zoom: number) => {
-    // Cancel any running animation
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(animationFrameRef.current);
       animationRef.current = null;
@@ -400,14 +416,12 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   const animateZoomIn = useCallback(
     (centerX?: number, centerY?: number) => {
       const nextLevel = ZOOM_LEVELS.find((level) => level > state.zoom) ?? MAX_ZOOM;
-      // Use screen center if no point specified
       const cx = centerX ?? 0;
       const cy = centerY ?? 0;
 
       if (centerX !== undefined && centerY !== undefined) {
         animateZoomTo(nextLevel, cx, cy);
       } else {
-        // Zoom without centering - just animate zoom value
         startAnimation(state.panX, state.panY, nextLevel, ZOOM_ANIMATION_DURATION);
       }
     },
@@ -458,11 +472,20 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteElements = useCallback((ids: string[]) => {
-    setState((prev) => ({
-      ...prev,
-      elements: prev.elements.filter((el) => !ids.includes(el.id)),
-      selectedIds: prev.selectedIds.filter((id) => !ids.includes(id)),
-    }));
+    setState((prev) => {
+      // Also clean up any group children data
+      const newGroupChildren = new Map(prev.groupChildren);
+      ids.forEach((id) => {
+        newGroupChildren.delete(id);
+      });
+
+      return {
+        ...prev,
+        elements: prev.elements.filter((el) => !ids.includes(el.id)),
+        selectedIds: prev.selectedIds.filter((id) => !ids.includes(id)),
+        groupChildren: newGroupChildren,
+      };
+    });
   }, []);
 
   const moveElements = useCallback((ids: string[], deltaX: number, deltaY: number) => {
@@ -475,6 +498,180 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
       ),
     }));
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Z-ORDER ACTIONS
+  // ---------------------------------------------------------------------------
+
+  const bringToFrontAction = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      elements: bringToFront(prev.elements, prev.selectedIds),
+    }));
+  }, []);
+
+  const sendToBackAction = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      elements: sendToBack(prev.elements, prev.selectedIds),
+    }));
+  }, []);
+
+  const bringForwardAction = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      elements: bringForward(prev.elements, prev.selectedIds),
+    }));
+  }, []);
+
+  const sendBackwardAction = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      elements: sendBackward(prev.elements, prev.selectedIds),
+    }));
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // GROUP ACTIONS
+  // ---------------------------------------------------------------------------
+
+  const groupSelected = useCallback(() => {
+    setState((prev) => {
+      if (!canGroup(prev.elements, prev.selectedIds)) {
+        return prev;
+      }
+
+      // Get selected elements
+      const selectedElements = prev.elements.filter((el) =>
+        prev.selectedIds.includes(el.id)
+      );
+
+      // Calculate bounding box
+      const bounds = calculateBoundingBox(selectedElements);
+
+      // Generate group ID
+      const groupId = generateId();
+
+      // Create group element
+      const groupElement: CanvasElement = {
+        id: groupId,
+        type: "group",
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        rotation: 0,
+        fill: "transparent",
+        stroke: "#6366f1",
+        strokeWidth: 1,
+        name: `Group (${selectedElements.length})`,
+        locked: false,
+        visible: true,
+        childIds: prev.selectedIds,
+      };
+
+      // Convert children to relative positions
+      const relativeChildren = makePositionsRelative(selectedElements, bounds.x, bounds.y);
+
+      // Find insertion position (where the topmost selected element was)
+      const selectedIndices = prev.elements
+        .map((el, i) => (prev.selectedIds.includes(el.id) ? i : -1))
+        .filter((i) => i !== -1);
+      const maxIndex = Math.max(...selectedIndices);
+
+      // Remove selected elements
+      const remainingElements = prev.elements.filter(
+        (el) => !prev.selectedIds.includes(el.id)
+      );
+
+      // Calculate correct insert position after removal
+      const insertIndex = Math.min(
+        maxIndex - (selectedIndices.length - 1),
+        remainingElements.length
+      );
+
+      // Insert group at the correct position
+      const newElements = [
+        ...remainingElements.slice(0, insertIndex),
+        groupElement,
+        ...remainingElements.slice(insertIndex),
+      ];
+
+      // Store children with relative positions
+      const newGroupChildren = new Map(prev.groupChildren);
+      newGroupChildren.set(groupId, relativeChildren);
+
+      return {
+        ...prev,
+        elements: newElements,
+        selectedIds: [groupId],
+        groupChildren: newGroupChildren,
+      };
+    });
+  }, []);
+
+  const ungroupSelected = useCallback(() => {
+    setState((prev) => {
+      // Find groups in selection
+      const groupIds = prev.selectedIds.filter((id) => {
+        const el = prev.elements.find((e) => e.id === id);
+        return el?.type === "group";
+      });
+
+      if (groupIds.length === 0) return prev;
+
+      let newElements = [...prev.elements];
+      const newSelectedIds: string[] = [];
+      const newGroupChildren = new Map(prev.groupChildren);
+
+      groupIds.forEach((groupId) => {
+        const groupIndex = newElements.findIndex((el) => el.id === groupId);
+        if (groupIndex === -1) return;
+
+        const group = newElements[groupIndex];
+        const children = newGroupChildren.get(groupId);
+
+        if (!children) return;
+
+        // Convert children back to absolute positions
+        const absoluteChildren = makePositionsAbsolute(children, group.x, group.y);
+
+        // Remove group and insert children at its position
+        newElements = [
+          ...newElements.slice(0, groupIndex),
+          ...absoluteChildren,
+          ...newElements.slice(groupIndex + 1),
+        ];
+
+        // Add children to selection
+        newSelectedIds.push(...absoluteChildren.map((c) => c.id));
+
+        // Remove group children data
+        newGroupChildren.delete(groupId);
+      });
+
+      // Add non-group selected items back to selection
+      const nonGroupSelectedIds = prev.selectedIds.filter(
+        (id) => !groupIds.includes(id)
+      );
+      newSelectedIds.push(...nonGroupSelectedIds);
+
+      return {
+        ...prev,
+        elements: newElements,
+        selectedIds: newSelectedIds,
+        groupChildren: newGroupChildren,
+      };
+    });
+  }, []);
+
+  const canGroupSelection = useCallback((): boolean => {
+    return canGroup(state.elements, state.selectedIds);
+  }, [state.elements, state.selectedIds]);
+
+  const canUngroupSelection = useCallback((): boolean => {
+    return canUngroup(state.elements, state.selectedIds);
+  }, [state.elements, state.selectedIds]);
 
   // ---------------------------------------------------------------------------
   // SELECTION ACTIONS
@@ -592,6 +789,14 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     updateElement,
     deleteElements,
     moveElements,
+    bringToFront: bringToFrontAction,
+    sendToBack: sendToBackAction,
+    bringForward: bringForwardAction,
+    sendBackward: sendBackwardAction,
+    groupSelected,
+    ungroupSelected,
+    canGroupSelection,
+    canUngroupSelection,
     selectElement,
     deselectAll,
     selectAll,

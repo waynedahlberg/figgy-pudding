@@ -46,7 +46,7 @@ export default function ProfileSettingsPage() {
             {/* Avatar */}
             <button className="relative group">
               <div className="w-20 h-20 rounded-full bg-surface3 flex items-center justify-center text-2xl font-semibold text-text-primary">
-                JD
+                WD
               </div>
               {/* Hover overlay */}
               <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">

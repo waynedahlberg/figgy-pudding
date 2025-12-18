@@ -55,7 +55,7 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
     backgroundColor: fill,
     borderColor: stroke,
     borderWidth: strokeWidth,
-    borderStyle: "solid",
+    borderStyle: type === "group" ? "dashed" : "solid",
     cursor: locked ? "not-allowed" : "move",
     userSelect: "none",
   };
@@ -91,6 +91,33 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
           </div>
         );
 
+      case "group":
+        return (
+          <div
+            style={{
+              ...baseStyle,
+              backgroundColor: "transparent",
+              borderRadius: 4,
+            }}
+            onMouseDown={(e) => onMouseDown(e, id)}
+          >
+            {/* Group indicator label */}
+            <div
+              className="absolute text-xs font-medium px-1 rounded"
+              style={{
+                top: -18 / zoom,
+                left: 0,
+                fontSize: 10 / zoom,
+                backgroundColor: stroke,
+                color: "white",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {element.name}
+            </div>
+          </div>
+        );
+
       case "rectangle":
       case "frame":
       case "image":
@@ -110,7 +137,7 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
   return (
     <div className="contents">
       {renderElement()}
-      
+
       {/* Selection indicator with resize and rotation handles */}
       {isSelected && (
         <SelectionBox
@@ -122,6 +149,7 @@ export const CanvasElementRenderer = memo(function CanvasElementRenderer({
           zoom={zoom}
           locked={locked}
           elementId={id}
+          isGroup={type === "group"}
           onResizeStart={onResizeStart}
           onRotateStart={onRotateStart}
         />
@@ -143,31 +171,33 @@ interface SelectionBoxProps {
   zoom: number;
   locked: boolean;
   elementId: string;
+  isGroup?: boolean;
   onResizeStart?: (e: React.MouseEvent, elementId: string, handle: ResizeHandle) => void;
   onRotateStart?: (e: React.MouseEvent, elementId: string) => void;
 }
 
-function SelectionBox({ 
-  x, 
-  y, 
-  width, 
-  height, 
-  rotation, 
+function SelectionBox({
+  x,
+  y,
+  width,
+  height,
+  rotation,
   zoom,
   locked,
   elementId,
+  isGroup,
   onResizeStart,
   onRotateStart,
 }: SelectionBoxProps) {
   const [isHoveringRotation, setIsHoveringRotation] = useState(false);
-  
+
   // Handle size should appear constant regardless of zoom
   const handleSize = 8 / zoom;
   const halfHandle = handleSize / 2;
-  
+
   // Border width should also be constant
   const borderWidth = 2 / zoom;
-  
+
   // Rotation handle offset (scaled for zoom)
   const rotationOffset = ROTATION_HANDLE_OFFSET / zoom;
   const rotationHandleSize = 12 / zoom;
@@ -194,6 +224,9 @@ function SelectionBox({
     }
   };
 
+  // Selection color - different for groups
+  const selectionColor = isGroup ? "#8b5cf6" : "#3b82f6";
+
   return (
     <div
       className="absolute pointer-events-none"
@@ -211,7 +244,7 @@ function SelectionBox({
         className="absolute bg-transparent"
         style={{
           inset: -borderWidth / 2,
-          border: `${borderWidth}px solid #3b82f6`,
+          border: `${borderWidth}px ${isGroup ? "dashed" : "solid"} ${selectionColor}`,
           borderRadius: 2 / zoom,
         }}
       />
@@ -219,12 +252,13 @@ function SelectionBox({
       {/* Center dot (visible when hovering rotation handles) */}
       {isHoveringRotation && (
         <div
-          className="absolute bg-accent rounded-full"
+          className="absolute rounded-full"
           style={{
             width: 6 / zoom,
             height: 6 / zoom,
             left: width / 2 - 3 / zoom,
             top: height / 2 - 3 / zoom,
+            backgroundColor: selectionColor,
           }}
         />
       )}
@@ -232,7 +266,7 @@ function SelectionBox({
       {/* Rotation handles (invisible hit areas at corners, outside the element) */}
       {!locked && rotationCorners.map((corner) => {
         const pos = rotationHandles[corner];
-        
+
         return (
           <div
             key={`rotate-${corner}`}
@@ -243,8 +277,6 @@ function SelectionBox({
               left: pos.x - rotationHandleSize / 2,
               top: pos.y - rotationHandleSize / 2,
               cursor: ROTATION_CURSOR,
-              // Debug: uncomment to see rotation handle areas
-              // backgroundColor: "rgba(255, 0, 0, 0.2)",
             }}
             onMouseDown={handleRotateMouseDown}
             onMouseEnter={() => setIsHoveringRotation(true)}
@@ -257,7 +289,7 @@ function SelectionBox({
       {!locked && resizeHandles.map((handle) => {
         const pos = resizeHandlePositions[handle];
         const cursor = RESIZE_CURSORS[handle];
-        
+
         return (
           <div
             key={handle}
@@ -267,7 +299,7 @@ function SelectionBox({
               height: handleSize,
               left: pos.x * width - halfHandle,
               top: pos.y * height - halfHandle,
-              border: `${borderWidth}px solid #3b82f6`,
+              border: `${borderWidth}px solid ${selectionColor}`,
               borderRadius: 1 / zoom,
               cursor: cursor,
             }}

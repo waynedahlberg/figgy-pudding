@@ -16,6 +16,7 @@ import {
   Share2,
   Settings,
   LayoutGrid,
+  PanelRight,
 } from "lucide-react";
 import { ToolbarButton } from "@/components/shared/toolbar-button";
 import { cn } from "@/lib/utils";
@@ -43,13 +44,20 @@ type ToolId = (typeof tools)[number]["id"];
 interface TopToolbarProps {
   isPaletteVisible?: boolean;
   onTogglePalette?: () => void;
+  isPropertiesPanelOpen?: boolean;
+  onTogglePropertiesPanel?: () => void;
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export function TopToolbar({ isPaletteVisible, onTogglePalette }: TopToolbarProps) {
+export function TopToolbar({
+  isPaletteVisible,
+  onTogglePalette,
+  isPropertiesPanelOpen,
+  onTogglePropertiesPanel,
+}: TopToolbarProps) {
   const router = useRouter();
   const [activeTool, setActiveTool] = useState<ToolId>("select");
 
@@ -85,10 +93,10 @@ export function TopToolbar({ isPaletteVisible, onTogglePalette }: TopToolbarProp
         {/* Logo */}
         <div className="flex items-center gap-2 px-2 mr-2">
           <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-            <span className="text-xs font-bold text-surface0">ZFR</span>
+            <span className="text-xs font-bold text-surface0">CF</span>
           </div>
           <span className="font-semibold text-text-primary hidden sm:inline">
-            Zfr
+            CanvasForge
           </span>
         </div>
 
@@ -139,6 +147,17 @@ export function TopToolbar({ isPaletteVisible, onTogglePalette }: TopToolbarProp
           />
         )}
 
+        {/* Properties Panel Toggle */}
+        {onTogglePropertiesPanel && (
+          <ToolbarButton
+            icon={<PanelRight className="w-4 h-4" />}
+            label="Properties Panel"
+            shortcut="⌘I"
+            isActive={isPropertiesPanelOpen}
+            onClick={onTogglePropertiesPanel}
+          />
+        )}
+
         {/* Divider */}
         <div className="w-px h-6 bg-border-subtle mx-1" />
 
@@ -146,7 +165,7 @@ export function TopToolbar({ isPaletteVisible, onTogglePalette }: TopToolbarProp
         <ToolbarButton
           icon={<Download className="w-4 h-4" />}
           label="Export"
-          shortcut="⌘E"
+          shortcut="⌘⇧E"
           onClick={() => console.log("Export")}
         />
 
@@ -172,7 +191,7 @@ export function TopToolbar({ isPaletteVisible, onTogglePalette }: TopToolbarProp
           onClick={() => router.push("/settings/profile")}
           className="ml-1 w-8 h-8 rounded-full bg-surface3 flex items-center justify-center text-sm font-medium text-text-primary hover:ring-2 hover:ring-accent transition-all"
         >
-          JD
+          WD
         </button>
       </div>
     </div>
