@@ -93,10 +93,10 @@ export function TopToolbar({
         {/* Logo */}
         <div className="flex items-center gap-2 px-2 mr-2">
           <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-            <span className="text-xs font-bold text-surface0">CF</span>
+            <span className="text-xs font-bold text-surface0">Zfr</span>
           </div>
           <span className="font-semibold text-text-primary hidden sm:inline">
-            CanvasForge
+            Zephyr
           </span>
         </div>
 
