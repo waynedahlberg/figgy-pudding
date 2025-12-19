@@ -1,5 +1,7 @@
 # Figgy Pudding - Next.js Application UI Tutorial
 
+![CleanShot 2025-12-18 at 23 38 13@2x_result](https://github.com/user-attachments/assets/4e7c3849-bc9e-48a9-bf99-8da2f6ae269c)
+
 A complete design tool interface built with Next.js 15, React 19, and Tailwind CSS 4.
 
 ## 🚀 Quick Start
