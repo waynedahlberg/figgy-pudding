@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import {
   X,
   Square,
   Circle,
   Type,
-  Image as ImageIcon,
+  Image,
   Frame,
   Lock,
   Unlock,
@@ -15,8 +15,10 @@ import {
   RotateCw,
   ChevronDown,
   ChevronRight,
+  Group,
 } from "lucide-react";
 import { useCanvasStore, CanvasElement } from "@/hooks/use-canvas-store";
+import { ColorWell } from "@/components/canvas/color-picker";
 import { cn } from "@/lib/utils";
 
 // =============================================================================
@@ -68,7 +70,7 @@ export function PropertiesPanel({ isOpen, onClose }: PropertiesPanelProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
         {!hasSelection ? (
           <div className="p-4 text-center">
             <p className="text-sm text-text-muted">No element selected</p>
@@ -210,9 +212,12 @@ function ElementTypeIcon({ type }: { type: CanvasElement["type"] }) {
     case "text":
       return <Type className={iconClass} />;
     case "image":
-      return <ImageIcon className={iconClass} />;
+      {/* eslint-disable-next-line jsx-a11y/alt-text */ }
+      return <Image className={iconClass} />;
     case "frame":
       return <Frame className={iconClass} />;
+    case "group":
+      return <Group className={iconClass} />;
     default:
       return <Square className={iconClass} />;
   }
@@ -229,16 +234,13 @@ interface NameInputProps {
 
 function NameInput({ element, onUpdate }: NameInputProps) {
   const [value, setValue] = useState(element.name);
-  const prevNameRef = useRef(element.name);
+  const [prevElementName, setPrevElementName] = useState(element.name);
 
-  useEffect(() => {
-    // Sync with external name changes
-    if (prevNameRef.current !== element.name) {
-      prevNameRef.current = element.name;
-      // eslint-disable-next-line
-      setValue(element.name);
-    }
-  }, [element.name]);
+  // Update local state only when element name changes externally
+  if (element.name !== prevElementName) {
+    setValue(element.name);
+    setPrevElementName(element.name);
+  }
 
   const handleBlur = () => {
     if (value !== element.name) {
@@ -315,17 +317,13 @@ function NumberInput({
   unit,
 }: NumberInputProps) {
   const [localValue, setLocalValue] = useState(value === "mixed" ? "" : String(value));
-  const prevValueRef = useRef(value);
+  const [prevValue, setPrevValue] = useState(value);
 
-  useEffect(() => {
-    // Only sync external value changes (not during local editing)
-    if (prevValueRef.current !== value) {
-      prevValueRef.current = value;
-      const newValue = value === "mixed" ? "" : String(value);
-      // eslint-disable-next-line
-      setLocalValue(newValue);
-    }
-  }, [value]);
+  // Update local value only when external value changes
+  if (value !== prevValue) {
+    setLocalValue(value === "mixed" ? "" : String(value));
+    setPrevValue(value);
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setLocalValue(e.target.value);
@@ -389,7 +387,7 @@ function NumberInput({
 }
 
 // =============================================================================
-// COLOR INPUT
+// COLOR INPUT (Using floating ColorWell)
 // =============================================================================
 
 interface ColorInputProps {
@@ -401,31 +399,14 @@ interface ColorInputProps {
 function ColorInput({ label, value, onChange }: ColorInputProps) {
   const displayValue = value === "mixed" ? "#888888" : value;
 
-  // Extract hex for color picker (handle rgba)
-  const getHexValue = (color: string): string => {
-    if (color.startsWith("#")) return color.slice(0, 7);
-    if (color.startsWith("rgb")) {
-      // Parse rgba/rgb
-      const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-      if (match) {
-        const r = parseInt(match[1]).toString(16).padStart(2, "0");
-        const g = parseInt(match[2]).toString(16).padStart(2, "0");
-        const b = parseInt(match[3]).toString(16).padStart(2, "0");
-        return `#${r}${g}${b}`;
-      }
-    }
-    return "#888888";
-  };
-
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs text-text-muted">{label}</label>
       <div className="flex items-center gap-2">
-        <input
-          type="color"
-          value={getHexValue(displayValue)}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-8 h-8 rounded border border-border-subtle cursor-pointer bg-transparent"
+        <ColorWell
+          color={displayValue}
+          onChange={onChange}
+          showAlpha={true}
         />
         <input
           type="text"
