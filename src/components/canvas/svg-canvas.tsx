@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useCanvasStore } from "@/hooks/use-canvas-store";
 import { SVGElementRenderer } from "./svg-element-renderer";
+import { usePenTool, PenToolOverlay } from "./pen-tool";
 import { ResizeHandle, RESIZE_CURSORS, calculateResize } from "@/lib/resize-utils";
 import {
   ROTATION_CURSOR,
@@ -13,7 +14,7 @@ import {
   getElementCenter,
 } from "@/lib/rotation-utils";
 import { snapToGrid, applySnapToResize } from "@/lib/snap-utils";
-import { shouldStartPan, getPanCursor, handleWheelEvent } from "@/lib/pan-zoom-utils";
+import { shouldStartPan, handleWheelEvent } from "@/lib/pan-zoom-utils";
 import { cn } from "@/lib/utils";
 
 // =============================================================================
@@ -118,6 +119,7 @@ export function InfiniteCanvas() {
     snapToGrid: snapEnabled,
     gridSize,
     showGrid,
+    activeTool,
     setPan,
     setZoom,
     animateZoomIn,
@@ -127,9 +129,13 @@ export function InfiniteCanvas() {
     deselectAll,
     updateElement,
     deleteElements,
+    setActiveTool,
   } = useCanvasStore();
 
   const { isDragOver, handleDragOver, handleDragLeave, handleDrop } = useCanvasDrop();
+
+  // Pen tool integration
+  const { penState, handleCanvasClick, handleMouseMove: handlePenMouseMove } = usePenTool();
 
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
@@ -177,7 +183,32 @@ export function InfiniteCanvas() {
       }
 
       if (e.key === "Escape") {
+        if (activeTool === "pen" && penState.isDrawing) {
+          // Pen tool handles its own escape
+          return;
+        }
         deselectAll();
+        setActiveTool("select");
+      }
+
+      // Tool shortcuts (only when no modifiers)
+      if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.key === "v" || e.key === "V") {
+          e.preventDefault();
+          setActiveTool("select");
+        }
+        if (e.key === "p" || e.key === "P") {
+          e.preventDefault();
+          setActiveTool("pen");
+        }
+        if (e.key === "r" || e.key === "R") {
+          e.preventDefault();
+          setActiveTool("rectangle");
+        }
+        if (e.key === "o" || e.key === "O") {
+          e.preventDefault();
+          setActiveTool("ellipse");
+        }
       }
 
       // Animated zoom shortcuts
@@ -215,7 +246,7 @@ export function InfiniteCanvas() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [selectedIds, deleteElements, deselectAll, animateZoomIn, animateZoomOut, animateResetView]);
+  }, [selectedIds, deleteElements, deselectAll, animateZoomIn, animateZoomOut, animateResetView, activeTool, penState.isDrawing, setActiveTool]);
 
   // =============================================================================
   // CANVAS MOUSE HANDLERS
@@ -244,11 +275,24 @@ export function InfiniteCanvas() {
         return;
       }
 
+      // Handle pen tool click
+      if (activeTool === "pen" && e.button === 0) {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const rect = container.getBoundingClientRect();
+        const canvasX = (e.clientX - rect.left - panX) / zoom;
+        const canvasY = (e.clientY - rect.top - panY) / zoom;
+
+        handleCanvasClick(canvasX, canvasY);
+        return;
+      }
+
       if (e.button === 0) {
         deselectAll();
       }
     },
-    [panX, panY, isSpacePressed, deselectAll]
+    [panX, panY, zoom, isSpacePressed, deselectAll, activeTool, handleCanvasClick]
   );
 
   // =============================================================================
@@ -416,6 +460,11 @@ export function InfiniteCanvas() {
         canvas: { x: Math.round(canvasX), y: Math.round(canvasY) },
       });
 
+      // Update pen tool preview
+      if (activeTool === "pen") {
+        handlePenMouseMove(canvasX, canvasY);
+      }
+
       if (!dragState.isDragging) return;
 
       const pixelDeltaX = e.clientX - dragState.startX;
@@ -497,7 +546,7 @@ export function InfiniteCanvas() {
         });
       }
     },
-    [dragState, panX, panY, zoom, setPan, updateElement, snapEnabled, gridSize]
+    [dragState, panX, panY, zoom, setPan, updateElement, snapEnabled, gridSize, activeTool, handlePenMouseMove]
   );
 
   const handleMouseUp = useCallback(() => {
@@ -605,7 +654,7 @@ export function InfiniteCanvas() {
   // CURSOR
   // =============================================================================
 
-  const getCursor = () => {
+  const getCursor = useCallback(() => {
     if (dragState.isDragging) {
       if (dragState.mode === "resize" && dragState.resizeHandle) {
         return RESIZE_CURSORS[dragState.resizeHandle];
@@ -616,9 +665,29 @@ export function InfiniteCanvas() {
       if (dragState.mode === "move") {
         return "move";
       }
+      if (dragState.mode === "pan") {
+        return "grabbing";
+      }
     }
-    return getPanCursor(isSpacePressed, dragState.mode === "pan");
-  };
+
+    // Space pressed for pan mode
+    if (isSpacePressed) {
+      return "grab";
+    }
+
+    // Tool-specific cursors
+    if (activeTool === "pen") {
+      return "crosshair";
+    }
+    if (activeTool === "rectangle" || activeTool === "ellipse") {
+      return "crosshair";
+    }
+
+    return "default";
+  }, [dragState.isDragging, dragState.mode, dragState.resizeHandle, isSpacePressed, activeTool]);
+
+  // Force cursor update when activeTool changes
+  const currentCursor = getCursor();
 
   // =============================================================================
   // RENDER
@@ -631,7 +700,8 @@ export function InfiniteCanvas() {
         "w-full h-full overflow-hidden relative select-none",
         isDragOver && "ring-2 ring-accent ring-inset"
       )}
-      style={{ cursor: getCursor() }}
+      style={{ cursor: currentCursor }}
+      data-tool={activeTool}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -711,6 +781,11 @@ export function InfiniteCanvas() {
               onRotateStart={handleRotateStart}
             />
           ))}
+
+          {/* Pen tool preview overlay */}
+          {activeTool === "pen" && (
+            <PenToolOverlay penState={penState} zoom={zoom} />
+          )}
         </g>
       </svg>
 
@@ -739,6 +814,10 @@ export function InfiniteCanvas() {
           <span className="text-text-muted">Snap:</span>
           <span className={snapEnabled ? "text-green-400" : "text-text-muted"}>
             {snapEnabled ? `ON (${gridSize}px)` : "OFF"}
+          </span>
+          <span className="text-text-muted">Tool:</span>
+          <span className={activeTool === "pen" ? "text-pink-400" : "text-purple-400"}>
+            {activeTool.toUpperCase()}
           </span>
           <span className="text-text-muted">Renderer:</span>
           <span className="text-purple-400">SVG</span>

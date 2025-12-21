@@ -15,3 +15,9 @@ export { InfiniteCanvas } from "./svg-canvas";
 
 // Re-export SVG utilities for external use
 export { elementsToSVG, elementToSVGString } from "./svg-element-renderer";
+
+// Re-export tool bar components
+export { ToolBar, FloatingToolBar, ToolIndicator } from "./tool-bar";
+
+// Re-export pen tool hook for advanced usage
+export { usePenTool } from "./pen-tool";

@@ -13,7 +13,49 @@ import {
   ROTATION_CURSOR,
   ROTATION_HANDLE_OFFSET,
 } from "@/lib/rotation-utils";
-import { pathToSVGString } from "@/lib/path-utils";
+import { pathToSVGString, PathData } from "@/lib/path-utils";
+
+// =============================================================================
+// HELPER: Get path bounds from PathData
+// =============================================================================
+
+function getPathBoundsFromData(pathData: PathData): { minX: number; minY: number; maxX: number; maxY: number } {
+  const { points } = pathData;
+  
+  if (points.length === 0) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  }
+  
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  
+  for (const point of points) {
+    if (point.type === "Z") continue;
+    
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+    
+    // Also consider control points
+    if (point.cp1) {
+      minX = Math.min(minX, point.cp1.x);
+      minY = Math.min(minY, point.cp1.y);
+      maxX = Math.max(maxX, point.cp1.x);
+      maxY = Math.max(maxY, point.cp1.y);
+    }
+    if (point.cp2) {
+      minX = Math.min(minX, point.cp2.x);
+      minY = Math.min(minY, point.cp2.y);
+      maxX = Math.max(maxX, point.cp2.x);
+      maxY = Math.max(maxY, point.cp2.y);
+    }
+  }
+  
+  return { minX, minY, maxX, maxY };
+}
 
 // =============================================================================
 // TYPES
@@ -93,19 +135,58 @@ export const SVGElementRenderer = memo(function SVGElementRenderer({
 
       case "path":
         // Paths render using their pathData
+        // The path points are stored in absolute coords from when path was created
+        // We need to transform the path to match the element's current position, size, and rotation
         if (!element.pathData) {
           return null;
         }
         const pathD = element.pathData.d || pathToSVGString(element.pathData);
+        
+        // Get original path bounds
+        const pathBounds = getPathBoundsFromData(element.pathData);
+        const originalWidth = pathBounds.maxX - pathBounds.minX;
+        const originalHeight = pathBounds.maxY - pathBounds.minY;
+        
+        // Calculate scale factors (avoid division by zero)
+        const scaleX = originalWidth > 0 ? width / originalWidth : 1;
+        const scaleY = originalHeight > 0 ? height / originalHeight : 1;
+        
+        // Build transform: translate to origin, scale, translate to position, then rotate
+        // The order matters! We need to:
+        // 1. Translate path so its min point is at origin
+        // 2. Scale it to match the new size
+        // 3. Translate to the element's position
+        // 4. Rotate around the element's center
+        
+        const transforms: string[] = [];
+        
+        // If rotated, rotate around the element's center (in final coordinates)
+        if (rotation) {
+          transforms.push(`rotate(${rotation} ${x + width / 2} ${y + height / 2})`);
+        }
+        
+        // Translate to element position
+        transforms.push(`translate(${x}, ${y})`);
+        
+        // Scale from original size to new size
+        if (scaleX !== 1 || scaleY !== 1) {
+          transforms.push(`scale(${scaleX}, ${scaleY})`);
+        }
+        
+        // Translate path so its origin (minX, minY) is at 0,0
+        transforms.push(`translate(${-pathBounds.minX}, ${-pathBounds.minY})`);
+        
+        const pathTransform = transforms.join(' ');
+        
         return (
           <path
             d={pathD}
             fill={fill}
             stroke={stroke}
-            strokeWidth={strokeWidth}
+            strokeWidth={strokeWidth / Math.max(scaleX, scaleY)} // Adjust stroke for scale
             strokeLinecap="round"
             strokeLinejoin="round"
-            transform={rotationTransform}
+            transform={pathTransform}
             style={{ cursor }}
             onMouseDown={(e) => onMouseDown(e, id)}
           />
@@ -339,7 +420,32 @@ export function elementToSVGString(element: CanvasElement): string {
     case "path":
       if (!element.pathData) return "";
       const pathD = element.pathData.d || pathToSVGString(element.pathData);
-      return `<path d="${pathD}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${transform}/>`;
+      
+      // Get original path bounds
+      const pathBounds = getPathBoundsFromData(element.pathData);
+      const originalWidth = pathBounds.maxX - pathBounds.minX;
+      const originalHeight = pathBounds.maxY - pathBounds.minY;
+      
+      // Calculate scale factors
+      const scaleX = originalWidth > 0 ? width / originalWidth : 1;
+      const scaleY = originalHeight > 0 ? height / originalHeight : 1;
+      
+      // Build transform chain
+      const transforms: string[] = [];
+      
+      if (rotation) {
+        transforms.push(`rotate(${rotation} ${x + width / 2} ${y + height / 2})`);
+      }
+      transforms.push(`translate(${x}, ${y})`);
+      if (scaleX !== 1 || scaleY !== 1) {
+        transforms.push(`scale(${scaleX}, ${scaleY})`);
+      }
+      transforms.push(`translate(${-pathBounds.minX}, ${-pathBounds.minY})`);
+      
+      const pathTransform = transforms.length > 0 ? ` transform="${transforms.join(' ')}"` : "";
+      const adjustedStrokeWidth = strokeWidth / Math.max(scaleX, scaleY);
+      
+      return `<path d="${pathD}" fill="${fill}" stroke="${stroke}" stroke-width="${adjustedStrokeWidth}" stroke-linecap="round" stroke-linejoin="round"${pathTransform}/>`;
 
     case "rectangle":
     case "frame":
