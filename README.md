@@ -1,4 +1,4 @@
-# Figgy Pudding - Next.js Application UI Tutorial
+# Zephyr - Vector-based canvas design tool
 
 ![CleanShot 2025-12-18 at 23 38 13@2x_result](https://github.com/user-attachments/assets/4e7c3849-bc9e-48a9-bf99-8da2f6ae269c)
 
@@ -64,33 +64,36 @@ src/
 ## ⌨️ Keyboard Shortcuts
 
 ### Tools
-| Key | Action |
-|-----|--------|
+
+| Key | Action      |
+| --- | ----------- |
 | `V` | Select tool |
-| `H` | Hand tool |
-| `R` | Rectangle |
-| `O` | Ellipse |
-| `T` | Text |
-| `F` | Frame |
+| `H` | Hand tool   |
+| `R` | Rectangle   |
+| `O` | Ellipse     |
+| `T` | Text        |
+| `F` | Frame       |
 
 ### Canvas
-| Shortcut | Action |
-|----------|--------|
-| `Space + Drag` | Pan canvas |
-| `Scroll` | Zoom in/out |
-| `⌘ +` | Zoom in |
-| `⌘ -` | Zoom out |
-| `⌘ 0` | Reset view (100%) |
+
+| Shortcut       | Action            |
+| -------------- | ----------------- |
+| `Space + Drag` | Pan canvas        |
+| `Scroll`       | Zoom in/out       |
+| `⌘ +`          | Zoom in           |
+| `⌘ -`          | Zoom out          |
+| `⌘ 0`          | Reset view (100%) |
 
 ### Selection & Editing
-| Shortcut | Action |
-|----------|--------|
-| `Click` | Select element |
-| `Shift + Click` | Add to selection |
-| `Escape` | Deselect all |
-| `Delete / Backspace` | Delete selected |
-| `⌘ K` | Open command menu |
-| `?` | Show keyboard shortcuts |
+
+| Shortcut             | Action                  |
+| -------------------- | ----------------------- |
+| `Click`              | Select element          |
+| `Shift + Click`      | Add to selection        |
+| `Escape`             | Deselect all            |
+| `Delete / Backspace` | Delete selected         |
+| `⌘ K`                | Open command menu       |
+| `?`                  | Show keyboard shortcuts |
 
 ## 🎨 Theme System
 
@@ -98,45 +101,50 @@ The app uses CSS custom properties defined in `globals.css`:
 
 ```css
 @theme {
-  --color-surface0: #0a0a0b;    /* Darkest background */
-  --color-surface1: #141416;    /* Panels, sidebars */
-  --color-surface2: #1e1e21;    /* Hover states */
-  --color-surface3: #28282c;    /* Active states */
-  
+  --color-surface0: #0a0a0b; /* Darkest background */
+  --color-surface1: #141416; /* Panels, sidebars */
+  --color-surface2: #1e1e21; /* Hover states */
+  --color-surface3: #28282c; /* Active states */
+
   --color-text-primary: #fafafa;
   --color-text-secondary: #a1a1aa;
   --color-text-muted: #52525b;
-  
-  --color-accent: #3b82f6;      /* Blue accent */
+
+  --color-accent: #3b82f6; /* Blue accent */
 }
 ```
 
 ## 🔧 Key Patterns
 
 ### 1. Viewport Layout (No Scroll)
+
 ```tsx
-<div className="h-screen flex flex-col overflow-hidden">
-  <header style={{ height: "var(--toolbar-height)" }} />
-  <div className="flex-1 flex min-h-0">  {/* min-h-0 is critical! */}
-    <aside style={{ width: "var(--sidebar-width)" }} />
-    <main className="flex-1 min-w-0 overflow-hidden" />
+<div className='h-screen flex flex-col overflow-hidden'>
+  <header style={{ height: 'var(--toolbar-height)' }} />
+  <div className='flex-1 flex min-h-0'>
+    {' '}
+    {/* min-h-0 is critical! */}
+    <aside style={{ width: 'var(--sidebar-width)' }} />
+    <main className='flex-1 min-w-0 overflow-hidden' />
   </div>
-  <footer style={{ height: "var(--statusbar-height)" }} />
+  <footer style={{ height: 'var(--statusbar-height)' }} />
 </div>
 ```
 
 ### 2. Canvas Coordinate Systems
+
 ```typescript
 // Screen → Canvas
-canvasX = (screenX - panX) / zoom
-canvasY = (screenY - panY) / zoom
+canvasX = (screenX - panX) / zoom;
+canvasY = (screenY - panY) / zoom;
 
-// Canvas → Screen  
-screenX = canvasX * zoom + panX
-screenY = canvasY * zoom + panY
+// Canvas → Screen
+screenX = canvasX * zoom + panX;
+screenY = canvasY * zoom + panY;
 ```
 
 ### 3. Zoom to Cursor
+
 ```typescript
 // Keep point under cursor stationary while zooming
 const canvasX = (mouseX - panX) / oldZoom;
@@ -146,10 +154,13 @@ const newPanY = mouseY - canvasY * newZoom;
 ```
 
 ### 4. Drag with Start Positions
+
 ```typescript
 // On drag start: store original positions
 const startPositions = new Map();
-elements.forEach(el => startPositions.set(el.id, { x: el.x, y: el.y }));
+elements.forEach((el) =>
+  startPositions.set(el.id, { x: el.x, y: el.y })
+);
 
 // On drag move: calculate from start, not current
 const delta = (mouseX - startX) / zoom;
@@ -159,6 +170,7 @@ startPositions.forEach((start, id) => {
 ```
 
 ### 5. Route Groups for Different Layouts
+
 ```
 app/
 ├── (app)/          # Uses app layout with toolbars
@@ -168,6 +180,7 @@ app/
 ```
 
 ### 6. Hydration-Safe Client Positioning
+
 ```typescript
 const [position, setPosition] = useState({ x: 0, y: 0 });
 const hasInitialized = useRef(false);
