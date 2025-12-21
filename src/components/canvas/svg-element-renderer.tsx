@@ -13,6 +13,7 @@ import {
   ROTATION_CURSOR,
   ROTATION_HANDLE_OFFSET,
 } from "@/lib/rotation-utils";
+import { pathToSVGString } from "@/lib/path-utils";
 
 // =============================================================================
 // TYPES
@@ -84,6 +85,26 @@ export const SVGElementRenderer = memo(function SVGElementRenderer({
             stroke={stroke}
             strokeWidth={strokeWidth}
             strokeDasharray="5,5"
+            transform={rotationTransform}
+            style={{ cursor }}
+            onMouseDown={(e) => onMouseDown(e, id)}
+          />
+        );
+
+      case "path":
+        // Paths render using their pathData
+        if (!element.pathData) {
+          return null;
+        }
+        const pathD = element.pathData.d || pathToSVGString(element.pathData);
+        return (
+          <path
+            d={pathD}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
             transform={rotationTransform}
             style={{ cursor }}
             onMouseDown={(e) => onMouseDown(e, id)}
@@ -314,6 +335,11 @@ export function elementToSVGString(element: CanvasElement): string {
 
     case "group":
       return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="4" ry="4" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-dasharray="5,5"${transform}/>`;
+
+    case "path":
+      if (!element.pathData) return "";
+      const pathD = element.pathData.d || pathToSVGString(element.pathData);
+      return `<path d="${pathD}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${transform}/>`;
 
     case "rectangle":
     case "frame":

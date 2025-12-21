@@ -29,6 +29,7 @@ import {
   canGroup,
   canUngroup,
 } from "@/lib/group-utils";
+import { PathData } from "@/lib/path-utils";
 
 // =============================================================================
 // TYPES
@@ -36,7 +37,7 @@ import {
 
 export interface CanvasElement {
   id: string;
-  type: "rectangle" | "ellipse" | "text" | "image" | "frame" | "group";
+  type: "rectangle" | "ellipse" | "text" | "image" | "frame" | "group" | "path";
   x: number;
   y: number;
   width: number;
@@ -50,6 +51,8 @@ export interface CanvasElement {
   visible: boolean;
   // Group-specific properties
   childIds?: string[];
+  // Path-specific properties
+  pathData?: PathData;
 }
 
 interface AnimationState {
@@ -79,7 +82,12 @@ interface CanvasState {
   gridSize: number;
   showGrid: boolean;
   showRulers: boolean;
+  // Tool state
+  activeTool: ToolType;
 }
+
+// Tool types
+export type ToolType = "select" | "pen" | "rectangle" | "ellipse";
 
 interface CanvasStore extends CanvasState {
   // Viewport actions
@@ -123,6 +131,8 @@ interface CanvasStore extends CanvasState {
   toggleShowGrid: () => void;
   setShowRulers: (show: boolean) => void;
   toggleShowRulers: () => void;
+  // Tool actions
+  setActiveTool: (tool: ToolType) => void;
   // Helpers
   getSelectedElements: () => CanvasElement[];
   getElementById: (id: string) => CanvasElement | undefined;
@@ -224,6 +234,7 @@ const initialState: CanvasState = {
   gridSize: DEFAULT_GRID_SIZE,
   showGrid: true,
   showRulers: false,
+  activeTool: "select",
 };
 
 // =============================================================================
@@ -322,66 +333,58 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   // ---------------------------------------------------------------------------
 
   const setPan = useCallback((x: number, y: number) => {
-    if (animationFrameRef.current !== null) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationRef.current = null;
-    }
     setState((prev) => ({ ...prev, panX: x, panY: y }));
   }, []);
 
   const adjustPan = useCallback((deltaX: number, deltaY: number) => {
-    setState((prev) => ({
-      ...prev,
-      panX: prev.panX + deltaX,
-      panY: prev.panY + deltaY,
-    }));
+    setState((prev) => ({ ...prev, panX: prev.panX + deltaX, panY: prev.panY + deltaY }));
   }, []);
 
   const setZoom = useCallback((zoom: number) => {
-    if (animationFrameRef.current !== null) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationRef.current = null;
-    }
-    const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+    const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
     setState((prev) => ({ ...prev, zoom: clampedZoom }));
   }, []);
 
   const zoomTo = useCallback((newZoom: number, centerX: number, centerY: number) => {
     setState((prev) => {
-      const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
+      const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
       const canvasX = (centerX - prev.panX) / prev.zoom;
       const canvasY = (centerY - prev.panY) / prev.zoom;
       const newPanX = centerX - canvasX * clampedZoom;
       const newPanY = centerY - canvasY * clampedZoom;
-      return { ...prev, panX: newPanX, panY: newPanY, zoom: clampedZoom };
+      return { ...prev, zoom: clampedZoom, panX: newPanX, panY: newPanY };
     });
   }, []);
 
   const zoomIn = useCallback((centerX?: number, centerY?: number) => {
     setState((prev) => {
-      const nextLevel = ZOOM_LEVELS.find((level) => level > prev.zoom) ?? MAX_ZOOM;
+      const currentIndex = ZOOM_LEVELS.findIndex((z) => z >= prev.zoom);
+      const nextIndex = Math.min(currentIndex + 1, ZOOM_LEVELS.length - 1);
+      const newZoom = ZOOM_LEVELS[nextIndex];
       if (centerX !== undefined && centerY !== undefined) {
         const canvasX = (centerX - prev.panX) / prev.zoom;
         const canvasY = (centerY - prev.panY) / prev.zoom;
-        const newPanX = centerX - canvasX * nextLevel;
-        const newPanY = centerY - canvasY * nextLevel;
-        return { ...prev, panX: newPanX, panY: newPanY, zoom: nextLevel };
+        const newPanX = centerX - canvasX * newZoom;
+        const newPanY = centerY - canvasY * newZoom;
+        return { ...prev, zoom: newZoom, panX: newPanX, panY: newPanY };
       }
-      return { ...prev, zoom: nextLevel };
+      return { ...prev, zoom: newZoom };
     });
   }, []);
 
   const zoomOut = useCallback((centerX?: number, centerY?: number) => {
     setState((prev) => {
-      const prevLevel = [...ZOOM_LEVELS].reverse().find((level) => level < prev.zoom) ?? MIN_ZOOM;
+      const currentIndex = ZOOM_LEVELS.findIndex((z) => z >= prev.zoom);
+      const nextIndex = Math.max(currentIndex - 1, 0);
+      const newZoom = ZOOM_LEVELS[nextIndex];
       if (centerX !== undefined && centerY !== undefined) {
         const canvasX = (centerX - prev.panX) / prev.zoom;
         const canvasY = (centerY - prev.panY) / prev.zoom;
-        const newPanX = centerX - canvasX * prevLevel;
-        const newPanY = centerY - canvasY * prevLevel;
-        return { ...prev, panX: newPanX, panY: newPanY, zoom: prevLevel };
+        const newPanX = centerX - canvasX * newZoom;
+        const newPanY = centerY - canvasY * newZoom;
+        return { ...prev, zoom: newZoom, panX: newPanX, panY: newPanY };
       }
-      return { ...prev, zoom: prevLevel };
+      return { ...prev, zoom: newZoom };
     });
   }, []);
 
@@ -394,53 +397,62 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // ANIMATED VIEWPORT ACTIONS
+  // ANIMATED ZOOM ACTIONS
   // ---------------------------------------------------------------------------
 
   const animateZoomTo = useCallback(
     (newZoom: number, centerX: number, centerY: number) => {
-      const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
-      const target = calculateZoomAnimationTarget(
+      const { panX: endPanX, panY: endPanY, zoom: endZoom } = calculateZoomAnimationTarget(
         state.panX,
         state.panY,
         state.zoom,
-        clampedZoom,
+        newZoom,
         centerX,
         centerY
       );
-      startAnimation(target.panX, target.panY, target.zoom, ZOOM_ANIMATION_DURATION);
+      startAnimation(endPanX, endPanY, endZoom, ZOOM_ANIMATION_DURATION);
     },
     [state.panX, state.panY, state.zoom, startAnimation]
   );
 
   const animateZoomIn = useCallback(
     (centerX?: number, centerY?: number) => {
-      const nextLevel = ZOOM_LEVELS.find((level) => level > state.zoom) ?? MAX_ZOOM;
+      const currentIndex = ZOOM_LEVELS.findIndex((z) => z >= state.zoom);
+      const nextIndex = Math.min(currentIndex + 1, ZOOM_LEVELS.length - 1);
+      const newZoom = ZOOM_LEVELS[nextIndex];
       const cx = centerX ?? 0;
       const cy = centerY ?? 0;
-
-      if (centerX !== undefined && centerY !== undefined) {
-        animateZoomTo(nextLevel, cx, cy);
-      } else {
-        startAnimation(state.panX, state.panY, nextLevel, ZOOM_ANIMATION_DURATION);
-      }
+      const { panX: endPanX, panY: endPanY, zoom: endZoom } = calculateZoomAnimationTarget(
+        state.panX,
+        state.panY,
+        state.zoom,
+        newZoom,
+        cx,
+        cy
+      );
+      startAnimation(endPanX, endPanY, endZoom, ZOOM_ANIMATION_DURATION);
     },
-    [state.zoom, state.panX, state.panY, animateZoomTo, startAnimation]
+    [state.panX, state.panY, state.zoom, startAnimation]
   );
 
   const animateZoomOut = useCallback(
     (centerX?: number, centerY?: number) => {
-      const prevLevel = [...ZOOM_LEVELS].reverse().find((level) => level < state.zoom) ?? MIN_ZOOM;
+      const currentIndex = ZOOM_LEVELS.findIndex((z) => z >= state.zoom);
+      const nextIndex = Math.max(currentIndex - 1, 0);
+      const newZoom = ZOOM_LEVELS[nextIndex];
       const cx = centerX ?? 0;
       const cy = centerY ?? 0;
-
-      if (centerX !== undefined && centerY !== undefined) {
-        animateZoomTo(prevLevel, cx, cy);
-      } else {
-        startAnimation(state.panX, state.panY, prevLevel, ZOOM_ANIMATION_DURATION);
-      }
+      const { panX: endPanX, panY: endPanY, zoom: endZoom } = calculateZoomAnimationTarget(
+        state.panX,
+        state.panY,
+        state.zoom,
+        newZoom,
+        cx,
+        cy
+      );
+      startAnimation(endPanX, endPanY, endZoom, ZOOM_ANIMATION_DURATION);
     },
-    [state.zoom, state.panX, state.panY, animateZoomTo, startAnimation]
+    [state.panX, state.panY, state.zoom, startAnimation]
   );
 
   const animateResetView = useCallback(() => {
@@ -453,11 +465,9 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
 
   const addElement = useCallback((element: Omit<CanvasElement, "id">): string => {
     const id = generateId();
-    const newElement: CanvasElement = { ...element, id };
     setState((prev) => ({
       ...prev,
-      elements: [...prev.elements, newElement],
-      selectedIds: [id],
+      elements: [...prev.elements, { ...element, id }],
     }));
     return id;
   }, []);
@@ -465,36 +475,23 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   const updateElement = useCallback((id: string, updates: Partial<CanvasElement>) => {
     setState((prev) => ({
       ...prev,
-      elements: prev.elements.map((el) =>
-        el.id === id ? { ...el, ...updates } : el
-      ),
+      elements: prev.elements.map((el) => (el.id === id ? { ...el, ...updates } : el)),
     }));
   }, []);
 
   const deleteElements = useCallback((ids: string[]) => {
-    setState((prev) => {
-      // Also clean up any group children data
-      const newGroupChildren = new Map(prev.groupChildren);
-      ids.forEach((id) => {
-        newGroupChildren.delete(id);
-      });
-
-      return {
-        ...prev,
-        elements: prev.elements.filter((el) => !ids.includes(el.id)),
-        selectedIds: prev.selectedIds.filter((id) => !ids.includes(id)),
-        groupChildren: newGroupChildren,
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      elements: prev.elements.filter((el) => !ids.includes(el.id)),
+      selectedIds: prev.selectedIds.filter((id) => !ids.includes(id)),
+    }));
   }, []);
 
   const moveElements = useCallback((ids: string[], deltaX: number, deltaY: number) => {
     setState((prev) => ({
       ...prev,
       elements: prev.elements.map((el) =>
-        ids.includes(el.id) && !el.locked
-          ? { ...el, x: el.x + deltaX, y: el.y + deltaY }
-          : el
+        ids.includes(el.id) ? { ...el, x: el.x + deltaX, y: el.y + deltaY } : el
       ),
     }));
   }, []);
@@ -736,6 +733,14 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ---------------------------------------------------------------------------
+  // TOOL ACTIONS
+  // ---------------------------------------------------------------------------
+
+  const setActiveTool = useCallback((tool: ToolType) => {
+    setState((prev) => ({ ...prev, activeTool: tool }));
+  }, []);
+
+  // ---------------------------------------------------------------------------
   // HELPERS
   // ---------------------------------------------------------------------------
 
@@ -807,6 +812,7 @@ export function CanvasProvider({ children }: { children: ReactNode }) {
     toggleShowGrid,
     setShowRulers,
     toggleShowRulers,
+    setActiveTool,
     getSelectedElements,
     getElementById,
     screenToCanvas,

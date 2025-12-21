@@ -4,6 +4,7 @@
 // Functions for exporting canvas elements to SVG format.
 
 import { CanvasElement } from "@/hooks/use-canvas-store";
+import { pathToSVGString } from "@/lib/path-utils";
 
 // =============================================================================
 // ELEMENT TO SVG STRING
@@ -25,6 +26,11 @@ export function elementToSVGString(element: CanvasElement): string {
 
     case "group":
       return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="4" ry="4" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-dasharray="5,5"${transform}/>`;
+
+    case "path":
+      if (!element.pathData) return "";
+      const pathD = element.pathData.d || pathToSVGString(element.pathData);
+      return `<path d="${pathD}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${transform}/>`;
 
     case "rectangle":
     case "frame":
