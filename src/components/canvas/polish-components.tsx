@@ -35,20 +35,20 @@ const shortcuts: ShortcutItem[] = [
   { keys: ["O"], description: "Ellipse", category: "Tools" },
   { keys: ["T"], description: "Text", category: "Tools" },
   { keys: ["F"], description: "Frame", category: "Tools" },
-  
+
   // Canvas
   { keys: ["Space", "Drag"], description: "Pan canvas", category: "Canvas" },
   { keys: ["Scroll"], description: "Zoom in/out", category: "Canvas" },
   { keys: ["⌘", "+"], description: "Zoom in", category: "Canvas" },
   { keys: ["⌘", "-"], description: "Zoom out", category: "Canvas" },
   { keys: ["⌘", "0"], description: "Reset view", category: "Canvas" },
-  
+
   // Selection
   { keys: ["Click"], description: "Select element", category: "Selection" },
   { keys: ["Shift", "Click"], description: "Add to selection", category: "Selection" },
   { keys: ["Esc"], description: "Deselect all", category: "Selection" },
   { keys: ["⌘", "A"], description: "Select all", category: "Selection" },
-  
+
   // Editing
   { keys: ["Delete"], description: "Delete selected", category: "Editing" },
   { keys: ["⌘", "K"], description: "Command menu", category: "Editing" },
@@ -226,8 +226,8 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               item.disabled
                 ? "text-text-muted cursor-not-allowed"
                 : item.danger
-                ? "text-red-500 hover:bg-red-500/10"
-                : "text-text-primary hover:bg-surface2"
+                  ? "text-red-500 hover:bg-red-500/10"
+                  : "text-text-primary hover:bg-surface2"
             )}
           >
             {item.icon && (
@@ -404,7 +404,7 @@ export function WelcomeToast({ isVisible, onDismiss }: WelcomeToastProps) {
         </div>
         <div>
           <p className="text-sm font-medium text-text-primary">
-            Welcome to Figgy Pudding!
+            Welcome to Zephyr!
           </p>
           <p className="text-xs text-text-secondary">
             Press <kbd className="px-1 py-0.5 bg-surface2 rounded">⌘K</kbd> to add elements or drag from the palette

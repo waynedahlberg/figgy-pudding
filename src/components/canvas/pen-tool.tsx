@@ -4,38 +4,63 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useCanvasStore } from "@/hooks/use-canvas-store";
 import {
   PathData,
+  PathPoint,
+  Point,
   moveTo,
   lineTo,
+  curveTo,
   updatePathString,
   getPathBoundingBox,
   getFirstAnchor,
+  getLastAnchor,
 } from "@/lib/path-utils";
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-interface PenToolState {
+interface DragInfo {
+  isDragging: boolean;
+  anchorX: number;
+  anchorY: number;
+  isInitialPoint: boolean;
+}
+
+export interface PenToolState {
   isDrawing: boolean;
   currentPath: PathData | null;
-  previewPoint: { x: number; y: number } | null;
+  previewPoint: Point | null;
+  dragInfo: DragInfo | null;
+  activeHandle: Point | null;
+  mirrorHandle: Point | null;
+  outgoingHandle: Point | null;
+  // Angle constraint state
+  isShiftHeld: boolean;
+  constrainedPreview: Point | null;
 }
 
 interface UsePenToolReturn {
   penState: PenToolState;
-  handleCanvasClick: (canvasX: number, canvasY: number) => void;
-  handleMouseMove: (canvasX: number, canvasY: number) => void;
+  handleMouseDown: (canvasX: number, canvasY: number, e: React.MouseEvent) => void;
+  handleMouseMove: (canvasX: number, canvasY: number, e: React.MouseEvent) => void;
+  handleMouseUp: (canvasX: number, canvasY: number, e: React.MouseEvent) => void;
+  handleDoubleClick: (canvasX: number, canvasY: number) => void;
   finishPath: (close?: boolean) => void;
   cancelPath: () => void;
+  deleteLastPoint: () => void;
 }
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-const CLOSE_THRESHOLD = 10; // Distance in canvas units to close path
+const CLOSE_THRESHOLD = 12;
+const DRAG_THRESHOLD = 3;
+const ANGLE_SNAP_THRESHOLD = 5; // degrees
 
-// Default colors for new paths
+// Angles to snap to (in degrees)
+const SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315, 360];
+
 const PATH_COLORS = [
   { fill: "none", stroke: "rgb(99, 102, 241)" },
   { fill: "none", stroke: "rgb(236, 72, 153)" },
@@ -50,26 +75,91 @@ function getRandomPathColor() {
 }
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+function getMirrorPoint(anchor: Point, handle: Point): Point {
+  return {
+    x: anchor.x - (handle.x - anchor.x),
+    y: anchor.y - (handle.y - anchor.y),
+  };
+}
+
+function dist(p1: Point, p2: Point): number {
+  return Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+}
+
+/**
+ * Constrain a point to snap to 45-degree angle increments from an origin
+ */
+function constrainToAngle(origin: Point, target: Point): Point {
+  const dx = target.x - origin.x;
+  const dy = target.y - origin.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  if (distance === 0) return target;
+  
+  // Get angle in degrees (0 = right, 90 = down)
+  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+  
+  // Find nearest snap angle
+  let nearestAngle = SNAP_ANGLES[0];
+  let minDiff = Math.abs(angle - nearestAngle);
+  
+  for (const snapAngle of SNAP_ANGLES) {
+    // Handle wrap-around for negative angles
+    const diff = Math.min(
+      Math.abs(angle - snapAngle),
+      Math.abs(angle - snapAngle + 360),
+      Math.abs(angle - snapAngle - 360)
+    );
+    if (diff < minDiff) {
+      minDiff = diff;
+      nearestAngle = snapAngle;
+    }
+  }
+  
+  // Convert back to radians and calculate new point
+  const snappedRad = nearestAngle * (Math.PI / 180);
+  return {
+    x: origin.x + Math.cos(snappedRad) * distance,
+    y: origin.y + Math.sin(snappedRad) * distance,
+  };
+}
+
+/**
+ * Get angle between two points in degrees
+ */
+function getAngle(from: Point, to: Point): number {
+  return Math.atan2(to.y - from.y, to.x - from.x) * (180 / Math.PI);
+}
+
+const INITIAL_STATE: PenToolState = {
+  isDrawing: false,
+  currentPath: null,
+  previewPoint: null,
+  dragInfo: null,
+  activeHandle: null,
+  mirrorHandle: null,
+  outgoingHandle: null,
+  isShiftHeld: false,
+  constrainedPreview: null,
+};
+
+// =============================================================================
 // PEN TOOL HOOK
 // =============================================================================
 
 export function usePenTool(): UsePenToolReturn {
   const { activeTool, addElement, selectElement, setActiveTool, zoom } = useCanvasStore();
-
-  const [penState, setPenState] = useState<PenToolState>({
-    isDrawing: false,
-    currentPath: null,
-    previewPoint: null,
-  });
-
-  // Store color for current path
+  const [penState, setPenState] = useState<PenToolState>(INITIAL_STATE);
+  
   const currentColorRef = useRef(getRandomPathColor());
   const previousToolRef = useRef(activeTool);
-  
-  // Ref to track paths that need to be finalized (deferred to avoid setState during render)
   const pendingPathRef = useRef<{ path: PathData; closed: boolean } | null>(null);
+  const lastClickTimeRef = useRef(0);
 
-  // Internal function to finish path and create element
+  // Create element from path
   const finishPathInternal = useCallback(
     (path: PathData, closed: boolean) => {
       if (!path || path.points.length < 2) return;
@@ -90,10 +180,7 @@ export function usePenTool(): UsePenToolReturn {
         name: closed ? "Closed Path" : "Path",
         locked: false,
         visible: true,
-        pathData: {
-          ...path,
-          closed,
-        },
+        pathData: { ...path, closed },
       });
 
       selectElement(elementId, false);
@@ -101,7 +188,7 @@ export function usePenTool(): UsePenToolReturn {
     [addElement, selectElement]
   );
 
-  // Process any pending path creation (runs after render)
+  // Process pending path after render
   useEffect(() => {
     if (pendingPathRef.current) {
       const { path, closed } = pendingPathRef.current;
@@ -110,172 +197,372 @@ export function usePenTool(): UsePenToolReturn {
     }
   });
 
-  // Handle click on canvas to add point
-  const handleCanvasClick = useCallback(
-    (canvasX: number, canvasY: number) => {
-      if (activeTool !== "pen") return;
+  // Track shift key state
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setPenState(prev => ({ ...prev, isShiftHeld: true }));
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setPenState(prev => ({ ...prev, isShiftHeld: false, constrainedPreview: null }));
+      }
+    };
+    
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  // Mouse down handler
+  const handleMouseDown = useCallback(
+    (canvasX: number, canvasY: number, e: React.MouseEvent) => {
+      if (activeTool !== "pen" || e.button !== 0) return;
 
       setPenState((prev) => {
-        // If not currently drawing, start a new path
+        let clickPoint = { x: canvasX, y: canvasY };
+        
+        // Apply angle constraint if shift is held and we have a reference point
+        if (prev.isShiftHeld && prev.isDrawing && prev.currentPath) {
+          const lastAnchor = getLastAnchor(prev.currentPath);
+          if (lastAnchor) {
+            clickPoint = constrainToAngle(lastAnchor, clickPoint);
+          }
+        }
+
+        // Start new path
         if (!prev.isDrawing || !prev.currentPath) {
           currentColorRef.current = getRandomPathColor();
-          const newPath: PathData = {
-            points: [moveTo(canvasX, canvasY)],
-            closed: false,
-          };
           return {
+            ...INITIAL_STATE,
             isDrawing: true,
-            currentPath: updatePathString(newPath),
-            previewPoint: null,
+            isShiftHeld: prev.isShiftHeld,
+            currentPath: updatePathString({
+              points: [moveTo(clickPoint.x, clickPoint.y)],
+              closed: false,
+            }),
+            dragInfo: { 
+              isDragging: true, 
+              anchorX: clickPoint.x, 
+              anchorY: clickPoint.y,
+              isInitialPoint: true,
+            },
           };
         }
 
-        // Check if clicking near the first point to close the path
+        // Check for closing path
         const firstAnchor = getFirstAnchor(prev.currentPath);
         if (firstAnchor && prev.currentPath.points.length > 2) {
-          const distance = Math.sqrt(
-            Math.pow(canvasX - firstAnchor.x, 2) + Math.pow(canvasY - firstAnchor.y, 2)
-          );
-
-          if (distance < CLOSE_THRESHOLD / zoom) {
-            // Close the path - defer element creation to after render
-            const closedPath = updatePathString({
-              ...prev.currentPath,
-              closed: true,
-            });
-            
-            // Schedule element creation for after this render
-            pendingPathRef.current = { path: closedPath, closed: true };
-
+          if (dist(clickPoint, firstAnchor) < CLOSE_THRESHOLD / zoom) {
             return {
-              isDrawing: false,
-              currentPath: null,
-              previewPoint: null,
+              ...prev,
+              dragInfo: { 
+                isDragging: true, 
+                anchorX: firstAnchor.x, 
+                anchorY: firstAnchor.y,
+                isInitialPoint: false,
+              },
+              activeHandle: null,
+              mirrorHandle: null,
             };
           }
         }
 
-        // Add a new point to the path
-        const newPoint = lineTo(canvasX, canvasY);
-        const newPath: PathData = {
-          ...prev.currentPath,
-          points: [...prev.currentPath.points, newPoint],
-        };
-
+        // Start placing new point
         return {
           ...prev,
-          currentPath: updatePathString(newPath),
+          dragInfo: { 
+            isDragging: true, 
+            anchorX: clickPoint.x, 
+            anchorY: clickPoint.y,
+            isInitialPoint: false,
+          },
+          activeHandle: null,
+          mirrorHandle: null,
         };
       });
     },
     [activeTool, zoom]
   );
 
-  // Handle mouse move for preview line
+  // Mouse move handler
   const handleMouseMove = useCallback(
-    (canvasX: number, canvasY: number) => {
+    (canvasX: number, canvasY: number, e: React.MouseEvent) => {
       if (activeTool !== "pen") return;
 
+      const isShift = e.shiftKey;
+
       setPenState((prev) => {
-        if (!prev.isDrawing) return prev;
-        return {
-          ...prev,
+        if (!prev.isDrawing) return { ...prev, isShiftHeld: isShift };
+
+        let targetPoint = { x: canvasX, y: canvasY };
+        let constrainedPoint: Point | null = null;
+
+        // If dragging (creating handles)
+        if (prev.dragInfo?.isDragging) {
+          const anchor = { x: prev.dragInfo.anchorX, y: prev.dragInfo.anchorY };
+          
+          // Constrain handle angle if shift held
+          if (isShift) {
+            targetPoint = constrainToAngle(anchor, targetPoint);
+            constrainedPoint = targetPoint;
+          }
+          
+          const handle = targetPoint;
+          const mirror = getMirrorPoint(anchor, handle);
+
+          return {
+            ...prev,
+            isShiftHeld: isShift,
+            activeHandle: handle,
+            mirrorHandle: mirror,
+            previewPoint: targetPoint,
+            constrainedPreview: constrainedPoint,
+          };
+        }
+
+        // Preview mode - constrain to angle from last anchor
+        if (isShift && prev.currentPath) {
+          const lastAnchor = getLastAnchor(prev.currentPath);
+          if (lastAnchor) {
+            targetPoint = constrainToAngle(lastAnchor, targetPoint);
+            constrainedPoint = targetPoint;
+          }
+        }
+
+        return { 
+          ...prev, 
+          isShiftHeld: isShift,
           previewPoint: { x: canvasX, y: canvasY },
+          constrainedPreview: constrainedPoint,
         };
       });
     },
     [activeTool]
   );
 
-  // Finish the current path (Enter key or double-click)
-  const finishPath = useCallback(
-    (close: boolean = false) => {
-      setPenState((prev) => {
-        if (!prev.isDrawing || !prev.currentPath) return prev;
+  // Mouse up handler
+  const handleMouseUp = useCallback(
+    (canvasX: number, canvasY: number, e: React.MouseEvent) => {
+      if (activeTool !== "pen") return;
 
-        if (prev.currentPath.points.length >= 2) {
-          // Schedule element creation for after this render
-          pendingPathRef.current = { path: prev.currentPath, closed: close };
+      const isShift = e.shiftKey;
+
+      setPenState((prev) => {
+        if (!prev.dragInfo?.isDragging || !prev.currentPath) {
+          return { ...prev, dragInfo: null, activeHandle: null, mirrorHandle: null };
+        }
+
+        const anchor = { x: prev.dragInfo.anchorX, y: prev.dragInfo.anchorY };
+        let cursor = { x: canvasX, y: canvasY };
+        
+        // Apply angle constraint to handle
+        if (isShift) {
+          cursor = constrainToAngle(anchor, cursor);
+        }
+        
+        const dragDistance = dist(anchor, cursor);
+        const wasDragged = dragDistance > DRAG_THRESHOLD / zoom;
+
+        // Initial point - just set outgoing handle
+        if (prev.dragInfo.isInitialPoint) {
+          return {
+            ...prev,
+            dragInfo: null,
+            activeHandle: null,
+            mirrorHandle: null,
+            outgoingHandle: wasDragged ? cursor : null,
+          };
+        }
+
+        // Check if closing
+        const firstAnchor = getFirstAnchor(prev.currentPath);
+        const isClosing =
+          firstAnchor &&
+          prev.currentPath.points.length > 2 &&
+          dist(anchor, firstAnchor) < CLOSE_THRESHOLD / zoom;
+
+        if (isClosing && firstAnchor) {
+          let closedPath = prev.currentPath;
+          const points = closedPath.points;
+
+          if (prev.outgoingHandle) {
+            const cp1 = prev.outgoingHandle;
+            const cp2 = wasDragged ? getMirrorPoint(firstAnchor, cursor) : firstAnchor;
+            closedPath = {
+              ...closedPath,
+              points: [...points, curveTo(firstAnchor.x, firstAnchor.y, cp1.x, cp1.y, cp2.x, cp2.y, "smooth")],
+              closed: true,
+            };
+          } else {
+            closedPath = {
+              ...closedPath,
+              points: [...points, lineTo(firstAnchor.x, firstAnchor.y)],
+              closed: true,
+            };
+          }
+
+          pendingPathRef.current = { path: updatePathString(closedPath), closed: true };
+          return { ...INITIAL_STATE, isShiftHeld: isShift };
+        }
+
+        // Add new point
+        const points = prev.currentPath.points;
+        let newPoint: PathPoint;
+        let newOutgoing: Point | null = null;
+
+        if (prev.outgoingHandle) {
+          const cp1 = prev.outgoingHandle;
+          if (wasDragged) {
+            const cp2 = getMirrorPoint(anchor, cursor);
+            newPoint = curveTo(anchor.x, anchor.y, cp1.x, cp1.y, cp2.x, cp2.y, "smooth");
+            newOutgoing = cursor;
+          } else {
+            newPoint = curveTo(anchor.x, anchor.y, cp1.x, cp1.y, anchor.x, anchor.y, "corner");
+            newOutgoing = null;
+          }
+        } else {
+          newPoint = lineTo(anchor.x, anchor.y);
+          newOutgoing = wasDragged ? cursor : null;
         }
 
         return {
-          isDrawing: false,
-          currentPath: null,
-          previewPoint: null,
+          ...prev,
+          currentPath: updatePathString({
+            ...prev.currentPath,
+            points: [...points, newPoint],
+          }),
+          dragInfo: null,
+          activeHandle: null,
+          mirrorHandle: null,
+          outgoingHandle: newOutgoing,
         };
       });
     },
-    []
+    [activeTool, zoom]
   );
 
-  // Cancel the current path (Escape key)
-  const cancelPath = useCallback(() => {
-    setPenState({
-      isDrawing: false,
-      currentPath: null,
-      previewPoint: null,
+  // Double-click to finish path
+  const handleDoubleClick = useCallback(
+    (canvasX: number, canvasY: number) => {
+      if (activeTool !== "pen") return;
+
+      setPenState((prev) => {
+        if (!prev.isDrawing || !prev.currentPath || prev.currentPath.points.length < 2) {
+          return prev;
+        }
+
+        // Check if double-clicking near first point to close
+        const firstAnchor = getFirstAnchor(prev.currentPath);
+        if (firstAnchor && prev.currentPath.points.length > 2) {
+          if (dist({ x: canvasX, y: canvasY }, firstAnchor) < CLOSE_THRESHOLD / zoom) {
+            pendingPathRef.current = { path: prev.currentPath, closed: true };
+            return INITIAL_STATE;
+          }
+        }
+
+        // Otherwise just finish as open path
+        pendingPathRef.current = { path: prev.currentPath, closed: false };
+        return INITIAL_STATE;
+      });
+    },
+    [activeTool, zoom]
+  );
+
+  // Finish path
+  const finishPath = useCallback((close = false) => {
+    setPenState((prev) => {
+      if (!prev.isDrawing || !prev.currentPath || prev.currentPath.points.length < 2) {
+        return INITIAL_STATE;
+      }
+      pendingPathRef.current = { path: prev.currentPath, closed: close };
+      return INITIAL_STATE;
     });
   }, []);
 
-  // Handle keyboard events
+  // Cancel path
+  const cancelPath = useCallback(() => {
+    setPenState(INITIAL_STATE);
+  }, []);
+
+  // Delete last point (Backspace while drawing)
+  const deleteLastPoint = useCallback(() => {
+    setPenState((prev) => {
+      if (!prev.isDrawing || !prev.currentPath || prev.currentPath.points.length <= 1) {
+        // If only one point or less, cancel the path
+        return INITIAL_STATE;
+      }
+
+      const points = prev.currentPath.points;
+      const newPoints = points.slice(0, -1);
+
+      return {
+        ...prev,
+        currentPath: updatePathString({
+          ...prev.currentPath,
+          points: newPoints,
+        }),
+        outgoingHandle: null, // Reset outgoing handle when deleting
+      };
+    });
+  }, []);
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (activeTool !== "pen") return;
-
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement
-      ) {
-        return;
-      }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
       if (e.key === "Escape") {
         e.preventDefault();
         cancelPath();
         setActiveTool("select");
       }
-
       if (e.key === "Enter") {
         e.preventDefault();
-        finishPath(e.shiftKey); // Shift+Enter to close
+        finishPath(e.shiftKey);
+      }
+      if (e.key === "Backspace" || e.key === "Delete") {
+        if (penState.isDrawing) {
+          e.preventDefault();
+          deleteLastPoint();
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTool, cancelPath, finishPath, setActiveTool]);
+  }, [activeTool, cancelPath, finishPath, deleteLastPoint, setActiveTool, penState.isDrawing]);
 
-  // Cancel path when switching away from pen tool
+  // Handle tool change
   useEffect(() => {
-    // Only run when tool changes from pen to something else
     if (previousToolRef.current === "pen" && activeTool !== "pen") {
       if (penState.isDrawing && penState.currentPath && penState.currentPath.points.length >= 2) {
-        // Schedule element creation for after this render
         pendingPathRef.current = { path: penState.currentPath, closed: false };
       }
-      // Schedule state update for next tick
-      queueMicrotask(() => {
-        setPenState({
-          isDrawing: false,
-          currentPath: null,
-          previewPoint: null,
-        });
-      });
+      queueMicrotask(() => setPenState(INITIAL_STATE));
     }
     previousToolRef.current = activeTool;
   }, [activeTool, penState.isDrawing, penState.currentPath]);
 
   return {
     penState,
-    handleCanvasClick,
+    handleMouseDown,
     handleMouseMove,
+    handleMouseUp,
+    handleDoubleClick,
     finishPath,
     cancelPath,
+    deleteLastPoint,
   };
 }
 
 // =============================================================================
-// PEN TOOL PREVIEW OVERLAY (SVG)
+// PEN TOOL OVERLAY
 // =============================================================================
 
 interface PenToolOverlayProps {
@@ -284,32 +571,51 @@ interface PenToolOverlayProps {
 }
 
 export function PenToolOverlay({ penState, zoom }: PenToolOverlayProps) {
-  const { isDrawing, currentPath, previewPoint } = penState;
+  const { 
+    isDrawing, 
+    currentPath, 
+    previewPoint, 
+    dragInfo, 
+    activeHandle, 
+    mirrorHandle, 
+    outgoingHandle,
+    isShiftHeld,
+    constrainedPreview,
+  } = penState;
 
   if (!isDrawing || !currentPath) return null;
 
   const { points } = currentPath;
   const firstAnchor = getFirstAnchor(currentPath);
-  const lastPoint = points[points.length - 1];
+  const lastAnchor = getLastAnchor(currentPath);
 
-  // Check if preview point is near first anchor (for close indicator)
-  let isNearStart = false;
-  if (previewPoint && firstAnchor && points.length > 2) {
-    const distance = Math.sqrt(
-      Math.pow(previewPoint.x - firstAnchor.x, 2) +
-      Math.pow(previewPoint.y - firstAnchor.y, 2)
-    );
-    isNearStart = distance < CLOSE_THRESHOLD / zoom;
-  }
+  // Use constrained preview if shift is held
+  const effectivePreview = constrainedPreview || previewPoint;
+  
+  // Check if near start for close indicator
+  const checkPoint = dragInfo?.isDragging && !dragInfo.isInitialPoint
+    ? { x: dragInfo.anchorX, y: dragInfo.anchorY } 
+    : effectivePreview;
+    
+  const isNearStart =
+    checkPoint && firstAnchor && points.length > 2 && dist(checkPoint, firstAnchor) < CLOSE_THRESHOLD / zoom;
 
-  // Size adjustments for zoom
+  // Sizes
   const pointRadius = 4 / zoom;
+  const handleRadius = 3 / zoom;
   const strokeWidth = 2 / zoom;
-  const previewStrokeWidth = 1 / zoom;
+  const thinStroke = 1 / zoom;
+
+  // Preview curve path
+  let previewPath = "";
+  if (effectivePreview && lastAnchor && outgoingHandle && !dragInfo?.isDragging) {
+    const target = isNearStart && firstAnchor ? firstAnchor : effectivePreview;
+    previewPath = `M ${lastAnchor.x} ${lastAnchor.y} C ${outgoingHandle.x} ${outgoingHandle.y} ${target.x} ${target.y} ${target.x} ${target.y}`;
+  }
 
   return (
     <g className="pen-tool-overlay">
-      {/* Existing path */}
+      {/* Existing committed path */}
       {currentPath.d && (
         <path
           d={currentPath.d}
@@ -321,28 +627,111 @@ export function PenToolOverlay({ penState, zoom }: PenToolOverlayProps) {
         />
       )}
 
-      {/* Preview line from last point to cursor */}
-      {previewPoint && lastPoint && (
-        <line
-          x1={lastPoint.x}
-          y1={lastPoint.y}
-          x2={isNearStart && firstAnchor ? firstAnchor.x : previewPoint.x}
-          y2={isNearStart && firstAnchor ? firstAnchor.y : previewPoint.y}
+      {/* Preview curve */}
+      {previewPath && (
+        <path
+          d={previewPath}
+          fill="none"
           stroke="rgb(99, 102, 241)"
-          strokeWidth={previewStrokeWidth}
+          strokeWidth={thinStroke}
           strokeDasharray={`${4 / zoom},${4 / zoom}`}
           opacity={0.7}
         />
       )}
 
-      {/* Anchor points */}
-      {points.map((point, index) => {
-        if (point.type === "Z") return null;
+      {/* Preview line (no outgoing handle) */}
+      {effectivePreview && lastAnchor && !outgoingHandle && !dragInfo?.isDragging && (
+        <line
+          x1={lastAnchor.x}
+          y1={lastAnchor.y}
+          x2={isNearStart && firstAnchor ? firstAnchor.x : effectivePreview.x}
+          y2={isNearStart && firstAnchor ? firstAnchor.y : effectivePreview.y}
+          stroke="rgb(99, 102, 241)"
+          strokeWidth={thinStroke}
+          strokeDasharray={`${4 / zoom},${4 / zoom}`}
+          opacity={0.7}
+        />
+      )}
 
-        const isFirst = index === 0;
+      {/* Angle constraint guide line (when shift held) */}
+      {isShiftHeld && constrainedPreview && lastAnchor && !dragInfo?.isDragging && (
+        <line
+          x1={lastAnchor.x}
+          y1={lastAnchor.y}
+          x2={constrainedPreview.x}
+          y2={constrainedPreview.y}
+          stroke="rgb(234, 179, 8)"
+          strokeWidth={thinStroke}
+          opacity={0.5}
+        />
+      )}
+
+      {/* Dragging handles */}
+      {dragInfo?.isDragging && activeHandle && mirrorHandle && (
+        <g>
+          <line
+            x1={mirrorHandle.x}
+            y1={mirrorHandle.y}
+            x2={activeHandle.x}
+            y2={activeHandle.y}
+            stroke={isShiftHeld ? "rgb(234, 179, 8)" : "rgb(99, 102, 241)"}
+            strokeWidth={thinStroke}
+            opacity={0.8}
+          />
+          <circle 
+            cx={activeHandle.x} 
+            cy={activeHandle.y} 
+            r={handleRadius} 
+            fill={isShiftHeld ? "rgb(234, 179, 8)" : "rgb(99, 102, 241)"} 
+            stroke="white" 
+            strokeWidth={thinStroke} 
+          />
+          <circle 
+            cx={mirrorHandle.x} 
+            cy={mirrorHandle.y} 
+            r={handleRadius} 
+            fill={isShiftHeld ? "rgb(234, 179, 8)" : "rgb(99, 102, 241)"} 
+            stroke="white" 
+            strokeWidth={thinStroke} 
+          />
+        </g>
+      )}
+
+      {/* Outgoing handle from last point */}
+      {outgoingHandle && lastAnchor && !dragInfo?.isDragging && (
+        <g>
+          <line
+            x1={lastAnchor.x}
+            y1={lastAnchor.y}
+            x2={outgoingHandle.x}
+            y2={outgoingHandle.y}
+            stroke="rgb(99, 102, 241)"
+            strokeWidth={thinStroke}
+            opacity={0.6}
+          />
+          <circle cx={outgoingHandle.x} cy={outgoingHandle.y} r={handleRadius} fill="rgb(99, 102, 241)" stroke="white" strokeWidth={thinStroke} />
+        </g>
+      )}
+
+      {/* Anchor points and curve handles */}
+      {points.map((point, i) => {
+        if (point.type === "Z") return null;
+        const isFirst = i === 0;
 
         return (
-          <g key={index}>
+          <g key={i}>
+            {/* Curve control points */}
+            {point.type === "C" && point.cp1 && point.cp2 && (
+              <>
+                {i > 0 && (
+                  <line x1={points[i - 1].x} y1={points[i - 1].y} x2={point.cp1.x} y2={point.cp1.y} stroke="rgb(99, 102, 241)" strokeWidth={thinStroke} opacity={0.4} />
+                )}
+                <line x1={point.cp2.x} y1={point.cp2.y} x2={point.x} y2={point.y} stroke="rgb(99, 102, 241)" strokeWidth={thinStroke} opacity={0.4} />
+                <circle cx={point.cp1.x} cy={point.cp1.y} r={handleRadius * 0.8} fill="white" stroke="rgb(99, 102, 241)" strokeWidth={thinStroke} opacity={0.6} />
+                <circle cx={point.cp2.x} cy={point.cp2.y} r={handleRadius * 0.8} fill="white" stroke="rgb(99, 102, 241)" strokeWidth={thinStroke} opacity={0.6} />
+              </>
+            )}
+
             {/* Anchor point */}
             <circle
               cx={point.x}
@@ -353,38 +742,52 @@ export function PenToolOverlay({ penState, zoom }: PenToolOverlayProps) {
               strokeWidth={strokeWidth}
             />
 
-            {/* Highlight first point when hovering near it */}
+            {/* Close indicator */}
             {isFirst && isNearStart && (
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r={pointRadius * 2}
-                fill="none"
-                stroke="rgb(99, 102, 241)"
-                strokeWidth={previewStrokeWidth}
-                opacity={0.5}
-              />
+              <>
+                <circle cx={point.x} cy={point.y} r={pointRadius * 2} fill="none" stroke="rgb(99, 102, 241)" strokeWidth={thinStroke} opacity={0.5} />
+                <circle cx={point.x} cy={point.y} r={pointRadius * 2.5} fill="none" stroke="rgb(34, 197, 94)" strokeWidth={thinStroke * 2} opacity={0.8} />
+              </>
             )}
           </g>
         );
       })}
 
-      {/* Preview point at cursor */}
-      {previewPoint && !isNearStart && (
-        <circle
-          cx={previewPoint.x}
-          cy={previewPoint.y}
-          r={pointRadius * 0.75}
-          fill="rgb(99, 102, 241)"
-          opacity={0.5}
+      {/* Current drag anchor */}
+      {dragInfo?.isDragging && !dragInfo.isInitialPoint && (
+        <circle cx={dragInfo.anchorX} cy={dragInfo.anchorY} r={pointRadius} fill="rgb(99, 102, 241)" stroke="white" strokeWidth={strokeWidth} />
+      )}
+
+      {/* Preview cursor point */}
+      {effectivePreview && !isNearStart && !dragInfo?.isDragging && (
+        <circle 
+          cx={effectivePreview.x} 
+          cy={effectivePreview.y} 
+          r={pointRadius * 0.75} 
+          fill={isShiftHeld ? "rgb(234, 179, 8)" : "rgb(99, 102, 241)"} 
+          opacity={0.5} 
         />
+      )}
+
+      {/* Point count indicator */}
+      {points.length > 0 && (
+        <text
+          x={points[0].x}
+          y={points[0].y - 20 / zoom}
+          fontSize={11 / zoom}
+          fill="rgb(99, 102, 241)"
+          textAnchor="middle"
+          opacity={0.7}
+        >
+          {points.length} {points.length === 1 ? 'point' : 'points'}
+        </text>
       )}
     </g>
   );
 }
 
 // =============================================================================
-// TOOL SWITCHER COMPONENT
+// TOOL BUTTON
 // =============================================================================
 
 interface ToolButtonProps {
@@ -395,23 +798,16 @@ interface ToolButtonProps {
   onClick: () => void;
 }
 
-function ToolButton({ icon, label, shortcut, isActive, onClick }: ToolButtonProps) {
+export function ToolButton({ icon, label, shortcut, isActive, onClick }: ToolButtonProps) {
   return (
     <button
       onClick={onClick}
       title={`${label} (${shortcut})`}
-      className={`
-        flex items-center justify-center w-8 h-8 rounded transition-colors
-        ${isActive
-          ? "bg-accent text-white"
-          : "text-text-secondary hover:bg-surface2 hover:text-text-primary"
-        }
-      `}
+      className={`flex items-center justify-center w-8 h-8 rounded transition-colors ${
+        isActive ? "bg-accent text-white" : "text-text-secondary hover:bg-surface2 hover:text-text-primary"
+      }`}
     >
       {icon}
     </button>
   );
 }
-
-// Export for use in toolbar
-export { ToolButton };

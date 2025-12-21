@@ -46,7 +46,7 @@ export default function SignupPage() {
 
     // Mock success - in real app, this would call your auth API
     console.log("Signup:", { name, email, password });
-    
+
     // Redirect to app after successful signup
     router.push("/");
   };
@@ -54,7 +54,7 @@ export default function SignupPage() {
   return (
     <AuthCard
       title="Create an account"
-      description="Start designing with Figgy Pudding today"
+      description="Start designing with Zephyr today"
       footer={
         <span className="text-text-secondary">
           Already have an account?{" "}

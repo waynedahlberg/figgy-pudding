@@ -1,4 +1,4 @@
-# Figgy Pudding Quick Reference
+# Zephyr Quick Reference
 
 ## Layout Patterns
 

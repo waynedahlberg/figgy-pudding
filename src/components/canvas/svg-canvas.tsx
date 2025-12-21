@@ -14,7 +14,7 @@ import {
   getElementCenter,
 } from "@/lib/rotation-utils";
 import { snapToGrid, applySnapToResize } from "@/lib/snap-utils";
-import { shouldStartPan, handleWheelEvent } from "@/lib/pan-zoom-utils";
+import { shouldStartPan, getPanCursor, handleWheelEvent } from "@/lib/pan-zoom-utils";
 import { cn } from "@/lib/utils";
 
 // =============================================================================
@@ -133,9 +133,15 @@ export function InfiniteCanvas() {
   } = useCanvasStore();
 
   const { isDragOver, handleDragOver, handleDragLeave, handleDrop } = useCanvasDrop();
-
+  
   // Pen tool integration
-  const { penState, handleCanvasClick, handleMouseMove: handlePenMouseMove } = usePenTool();
+  const { 
+    penState, 
+    handleMouseDown: handlePenMouseDown, 
+    handleMouseMove: handlePenMouseMove, 
+    handleMouseUp: handlePenMouseUp,
+    handleDoubleClick: handlePenDoubleClick,
+  } = usePenTool();
 
   const [dragState, setDragState] = useState<DragState>({
     isDragging: false,
@@ -275,16 +281,16 @@ export function InfiniteCanvas() {
         return;
       }
 
-      // Handle pen tool click
+      // Handle pen tool mouse down
       if (activeTool === "pen" && e.button === 0) {
         const container = containerRef.current;
         if (!container) return;
-
+        
         const rect = container.getBoundingClientRect();
         const canvasX = (e.clientX - rect.left - panX) / zoom;
         const canvasY = (e.clientY - rect.top - panY) / zoom;
-
-        handleCanvasClick(canvasX, canvasY);
+        
+        handlePenMouseDown(canvasX, canvasY, e);
         return;
       }
 
@@ -292,7 +298,7 @@ export function InfiniteCanvas() {
         deselectAll();
       }
     },
-    [panX, panY, zoom, isSpacePressed, deselectAll, activeTool, handleCanvasClick]
+    [panX, panY, zoom, isSpacePressed, deselectAll, activeTool, handlePenMouseDown]
   );
 
   // =============================================================================
@@ -460,9 +466,9 @@ export function InfiniteCanvas() {
         canvas: { x: Math.round(canvasX), y: Math.round(canvasY) },
       });
 
-      // Update pen tool preview
+      // Update pen tool (handles both preview and dragging for curves)
       if (activeTool === "pen") {
-        handlePenMouseMove(canvasX, canvasY);
+        handlePenMouseMove(canvasX, canvasY, e);
       }
 
       if (!dragState.isDragging) return;
@@ -549,7 +555,18 @@ export function InfiniteCanvas() {
     [dragState, panX, panY, zoom, setPan, updateElement, snapEnabled, gridSize, activeTool, handlePenMouseMove]
   );
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    // Handle pen tool mouse up
+    if (activeTool === "pen") {
+      const container = containerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const canvasX = (e.clientX - rect.left - panX) / zoom;
+        const canvasY = (e.clientY - rect.top - panY) / zoom;
+        handlePenMouseUp(canvasX, canvasY, e);
+      }
+    }
+    
     setDragState((prev) => ({
       ...prev,
       isDragging: false,
@@ -563,7 +580,7 @@ export function InfiniteCanvas() {
       rotateElementStartRotation: 0,
       rotateCenter: null,
     }));
-  }, []);
+  }, [activeTool, panX, panY, zoom, handlePenMouseUp]);
 
   const handleMouseLeave = useCallback(() => {
     if (dragState.isDragging) {
@@ -669,12 +686,12 @@ export function InfiniteCanvas() {
         return "grabbing";
       }
     }
-
+    
     // Space pressed for pan mode
     if (isSpacePressed) {
       return "grab";
     }
-
+    
     // Tool-specific cursors
     if (activeTool === "pen") {
       return "crosshair";
@@ -682,12 +699,29 @@ export function InfiniteCanvas() {
     if (activeTool === "rectangle" || activeTool === "ellipse") {
       return "crosshair";
     }
-
+    
     return "default";
   }, [dragState.isDragging, dragState.mode, dragState.resizeHandle, isSpacePressed, activeTool]);
-
+  
   // Force cursor update when activeTool changes
   const currentCursor = getCursor();
+
+  // Double-click handler for pen tool
+  const handleCanvasDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (activeTool === "pen") {
+        const container = containerRef.current;
+        if (!container) return;
+        
+        const rect = container.getBoundingClientRect();
+        const canvasX = (e.clientX - rect.left - panX) / zoom;
+        const canvasY = (e.clientY - rect.top - panY) / zoom;
+        
+        handlePenDoubleClick(canvasX, canvasY);
+      }
+    },
+    [activeTool, panX, panY, zoom, handlePenDoubleClick]
+  );
 
   // =============================================================================
   // RENDER
@@ -706,6 +740,7 @@ export function InfiniteCanvas() {
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
+      onDoubleClick={handleCanvasDoubleClick}
       onWheel={handleWheel}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -781,7 +816,7 @@ export function InfiniteCanvas() {
               onRotateStart={handleRotateStart}
             />
           ))}
-
+          
           {/* Pen tool preview overlay */}
           {activeTool === "pen" && (
             <PenToolOverlay penState={penState} zoom={zoom} />
