@@ -129,12 +129,33 @@ export function ToolIndicator() {
 }
 
 // =============================================================================
-// FLOATING TOOL BAR (positioned absolutely)
+// FLOATING TOOL BAR (positioned absolutely - above stats panel in lower left)
 // =============================================================================
 
 export function FloatingToolBar() {
   return (
-    <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10">
+    <div className="absolute left-4 bottom-24 z-10">
+      <ToolBar orientation="vertical" />
+    </div>
+  );
+}
+
+// =============================================================================
+// FLOATING ELEMENTS PANEL (positioned above stats panel)
+// =============================================================================
+
+interface FloatingElementsPanelProps {
+  className?: string;
+}
+
+export function FloatingElementsPanel({ className }: FloatingElementsPanelProps) {
+  return (
+    <div 
+      className={cn(
+        "absolute left-4 bottom-24 z-10",
+        className
+      )}
+    >
       <ToolBar orientation="vertical" />
     </div>
   );

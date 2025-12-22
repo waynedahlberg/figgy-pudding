@@ -4,7 +4,13 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { useCanvasStore } from "@/hooks/use-canvas-store";
 import { SVGElementRenderer } from "./svg-element-renderer";
 import { usePenTool, PenToolOverlay } from "./pen-tool";
-import { ResizeHandle, RESIZE_CURSORS, calculateResize } from "@/lib/resize-utils";
+import { 
+  ResizeHandle, 
+  RESIZE_CURSORS, 
+  calculateResize,
+  getRotatedCursor,
+  transformDeltaForRotation,
+} from "@/lib/resize-utils";
 import {
   ROTATION_CURSOR,
   calculateAngle,
@@ -32,6 +38,7 @@ interface DragState {
   resizeElementId: string | null;
   resizeHandle: ResizeHandle | null;
   resizeStartBounds: { x: number; y: number; width: number; height: number } | null;
+  resizeElementRotation: number; // Store rotation for center-based scaling
   rotateElementId: string | null;
   rotateStartAngle: number;
   rotateElementStartRotation: number;
@@ -154,6 +161,7 @@ export function InfiniteCanvas() {
     resizeElementId: null,
     resizeHandle: null,
     resizeStartBounds: null,
+    resizeElementRotation: 0,
     rotateElementId: null,
     rotateStartAngle: 0,
     rotateElementStartRotation: 0,
@@ -273,6 +281,7 @@ export function InfiniteCanvas() {
           resizeElementId: null,
           resizeHandle: null,
           resizeStartBounds: null,
+          resizeElementRotation: 0,
           rotateElementId: null,
           rotateStartAngle: 0,
           rotateElementStartRotation: 0,
@@ -354,6 +363,7 @@ export function InfiniteCanvas() {
         resizeElementId: null,
         resizeHandle: null,
         resizeStartBounds: null,
+        resizeElementRotation: 0,
         rotateElementId: null,
         rotateStartAngle: 0,
         rotateElementStartRotation: 0,
@@ -394,6 +404,7 @@ export function InfiniteCanvas() {
           width: element.width,
           height: element.height,
         },
+        resizeElementRotation: element.rotation || 0,
         rotateElementId: null,
         rotateStartAngle: 0,
         rotateElementStartRotation: 0,
@@ -436,6 +447,7 @@ export function InfiniteCanvas() {
         resizeElementId: null,
         resizeHandle: null,
         resizeStartBounds: null,
+        resizeElementRotation: 0,
         rotateElementId: elementId,
         rotateStartAngle: startAngle,
         rotateElementStartRotation: element.rotation,
@@ -498,8 +510,18 @@ export function InfiniteCanvas() {
           return;
         }
 
-        const canvasDeltaX = pixelDeltaX / zoom;
-        const canvasDeltaY = pixelDeltaY / zoom;
+        let canvasDeltaX = pixelDeltaX / zoom;
+        let canvasDeltaY = pixelDeltaY / zoom;
+
+        // For rotated objects, transform the delta to match the visual handle direction
+        const rotation = dragState.resizeElementRotation;
+        const isRotated = rotation !== 0;
+        
+        if (isRotated) {
+          const transformed = transformDeltaForRotation(canvasDeltaX, canvasDeltaY, rotation);
+          canvasDeltaX = transformed.dx;
+          canvasDeltaY = transformed.dy;
+        }
 
         let newBounds = calculateResize(
           dragState.resizeHandle,
@@ -513,11 +535,13 @@ export function InfiniteCanvas() {
             aspectRatio: e.shiftKey
               ? dragState.resizeStartBounds.width / dragState.resizeStartBounds.height
               : null,
+            centerBased: isRotated, // Use center-based scaling for rotated objects
           }
         );
 
-        if (snapEnabled) {
-          newBounds = applySnapToResize(newBounds, gridSize, true);
+        if (snapEnabled && !isRotated) {
+          // Only apply grid snap for non-rotated objects
+          newBounds = applySnapToResize(newBounds, gridSize);
         }
 
         updateElement(dragState.resizeElementId, {
@@ -575,6 +599,7 @@ export function InfiniteCanvas() {
       resizeElementId: null,
       resizeHandle: null,
       resizeStartBounds: null,
+      resizeElementRotation: 0,
       rotateElementId: null,
       rotateStartAngle: 0,
       rotateElementStartRotation: 0,
@@ -592,6 +617,7 @@ export function InfiniteCanvas() {
         resizeElementId: null,
         resizeHandle: null,
         resizeStartBounds: null,
+        resizeElementRotation: 0,
         rotateElementId: null,
         rotateStartAngle: 0,
         rotateElementStartRotation: 0,
@@ -674,7 +700,8 @@ export function InfiniteCanvas() {
   const getCursor = useCallback(() => {
     if (dragState.isDragging) {
       if (dragState.mode === "resize" && dragState.resizeHandle) {
-        return RESIZE_CURSORS[dragState.resizeHandle];
+        // Use rotation-aware cursor during resize
+        return getRotatedCursor(dragState.resizeHandle, dragState.resizeElementRotation);
       }
       if (dragState.mode === "rotate") {
         return ROTATION_CURSOR;
@@ -701,7 +728,7 @@ export function InfiniteCanvas() {
     }
     
     return "default";
-  }, [dragState.isDragging, dragState.mode, dragState.resizeHandle, isSpacePressed, activeTool]);
+  }, [dragState.isDragging, dragState.mode, dragState.resizeHandle, dragState.resizeElementRotation, isSpacePressed, activeTool]);
   
   // Force cursor update when activeTool changes
   const currentCursor = getCursor();

@@ -20,6 +20,7 @@ import {
   PanelLeft,
 } from "lucide-react";
 import { ToolbarButton } from "@/components/shared/toolbar-button";
+import { cn } from "@/lib/utils";
 
 // =============================================================================
 // TYPES
@@ -48,6 +49,12 @@ interface TopToolbarProps {
   onTogglePropertiesPanel?: () => void;
   isLeftSidebarOpen?: boolean;
   onToggleLeftSidebar?: () => void;
+  // Undo/Redo props (for future implementation)
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  // Export
   onExport?: () => void;
 }
 
@@ -60,8 +67,12 @@ export function TopToolbar({
   onTogglePalette,
   isPropertiesPanelOpen,
   onTogglePropertiesPanel,
-  isLeftSidebarOpen,
+  isLeftSidebarOpen = true,
   onToggleLeftSidebar,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
   onExport,
 }: TopToolbarProps) {
   const router = useRouter();
@@ -99,10 +110,10 @@ export function TopToolbar({
         {/* Logo */}
         <div className="flex items-center gap-2 px-2 mr-2">
           <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-            <span className="text-xs font-bold text-surface0">Z</span>
+            <span className="text-xs font-bold text-surface0">CF</span>
           </div>
           <span className="font-semibold text-text-primary hidden sm:inline">
-            Zephyr
+            CanvasForge
           </span>
         </div>
 
@@ -119,22 +130,6 @@ export function TopToolbar({
             onClick={onToggleLeftSidebar}
           />
         )}
-
-        {/* Undo/Redo */}
-        <ToolbarButton
-          icon={<Undo2 className="w-4 h-4" />}
-          label="Undo"
-          shortcut="⌘Z"
-          onClick={() => console.log("Undo")}
-          isDisabled
-        />
-        <ToolbarButton
-          icon={<Redo2 className="w-4 h-4" />}
-          label="Redo"
-          shortcut="⌘⇧Z"
-          onClick={() => console.log("Redo")}
-          isDisabled
-        />
       </div>
 
       {/* ============ CENTER SECTION - Tools ============ */}
@@ -178,6 +173,25 @@ export function TopToolbar({
         {/* Divider */}
         <div className="w-px h-6 bg-border-subtle mx-1" />
 
+        {/* Undo/Redo - Positioned on right side */}
+        <ToolbarButton
+          icon={<Undo2 className="w-4 h-4" />}
+          label="Undo"
+          shortcut="⌘Z"
+          onClick={onUndo}
+          disabled={!canUndo}
+        />
+        <ToolbarButton
+          icon={<Redo2 className="w-4 h-4" />}
+          label="Redo"
+          shortcut="⌘⇧Z"
+          onClick={onRedo}
+          disabled={!canRedo}
+        />
+
+        {/* Divider */}
+        <div className="w-px h-6 bg-border-subtle mx-1" />
+
         {/* Export */}
         <ToolbarButton
           icon={<Download className="w-4 h-4" />}
@@ -208,7 +222,7 @@ export function TopToolbar({
           onClick={() => router.push("/settings/profile")}
           className="ml-1 w-8 h-8 rounded-full bg-surface3 flex items-center justify-center text-sm font-medium text-text-primary hover:ring-2 hover:ring-accent transition-all"
         >
-          WD
+          JD
         </button>
       </div>
     </div>

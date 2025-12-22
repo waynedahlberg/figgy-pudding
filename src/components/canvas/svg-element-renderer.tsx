@@ -6,6 +6,7 @@ import {
   ResizeHandle,
   RESIZE_CURSORS,
   getHandlePositions,
+  getRotatedCursor,
 } from "@/lib/resize-utils";
 import {
   RotationCorner,
@@ -369,7 +370,8 @@ function SVGSelectionBox({
       {/* Resize handles */}
       {!locked && resizeHandles.map((handle) => {
         const pos = resizeHandlePositions[handle];
-        const cursor = RESIZE_CURSORS[handle];
+        // Use rotation-aware cursor
+        const cursor = getRotatedCursor(handle, rotation);
         
         // Calculate absolute position
         const handleX = x + pos.x * width - halfHandle;

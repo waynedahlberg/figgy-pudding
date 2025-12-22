@@ -1,22 +1,23 @@
 // =============================================================================
 // SNAP UTILITIES
 // =============================================================================
-// Math helpers for snapping element positions to a grid:
-// - Snap to grid on move/resize
-// - Configurable grid size
-// - Only affects new transformations, not existing positions
+// Grid snapping and alignment utilities.
+
+// =============================================================================
+// GRID SNAPPING
+// =============================================================================
 
 /**
- * Snap a value to the nearest grid line.
+ * Snap a value to the nearest grid increment.
  */
 export function snapToGrid(value: number, gridSize: number): number {
   return Math.round(value / gridSize) * gridSize;
 }
 
 /**
- * Snap a position (x, y) to the grid.
+ * Snap both x and y coordinates to grid.
  */
-export function snapPositionToGrid(
+export function snapPointToGrid(
   x: number,
   y: number,
   gridSize: number
@@ -27,171 +28,132 @@ export function snapPositionToGrid(
   };
 }
 
+// =============================================================================
+// RESIZE SNAPPING
+// =============================================================================
+
+export interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
- * Snap element bounds to grid.
- * Position snaps to grid, dimensions snap to grid increments.
+ * Apply grid snapping to resize bounds.
+ * Snaps edges to grid while maintaining minimum dimensions.
  */
-export function snapBoundsToGrid(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  gridSize: number
-): { x: number; y: number; width: number; height: number } {
-  const snappedX = snapToGrid(x, gridSize);
-  const snappedY = snapToGrid(y, gridSize);
-  
-  // For dimensions, snap to nearest grid increment but ensure minimum size
-  const snappedWidth = Math.max(gridSize, snapToGrid(width, gridSize));
-  const snappedHeight = Math.max(gridSize, snapToGrid(height, gridSize));
-  
+export function applySnapToResize(
+  bounds: Bounds,
+  gridSize: number,
+  minWidth: number = 10,
+  minHeight: number = 10
+): Bounds {
+  const snappedX = snapToGrid(bounds.x, gridSize);
+  const snappedY = snapToGrid(bounds.y, gridSize);
+  const snappedRight = snapToGrid(bounds.x + bounds.width, gridSize);
+  const snappedBottom = snapToGrid(bounds.y + bounds.height, gridSize);
+
+  let width = snappedRight - snappedX;
+  let height = snappedBottom - snappedY;
+
+  // Ensure minimum dimensions
+  if (width < minWidth) {
+    width = Math.max(minWidth, Math.ceil(minWidth / gridSize) * gridSize);
+  }
+  if (height < minHeight) {
+    height = Math.max(minHeight, Math.ceil(minHeight / gridSize) * gridSize);
+  }
+
   return {
     x: snappedX,
     y: snappedY,
-    width: snappedWidth,
-    height: snappedHeight,
+    width,
+    height,
   };
 }
 
-/**
- * Calculate snapped position delta.
- * Used when moving elements - snaps the resulting position, not the delta.
- */
-export function calculateSnappedMoveDelta(
-  startX: number,
-  startY: number,
-  deltaX: number,
-  deltaY: number,
-  gridSize: number,
-  snapEnabled: boolean
-): { x: number; y: number } {
-  const newX = startX + deltaX;
-  const newY = startY + deltaY;
-  
-  if (!snapEnabled) {
-    return { x: newX, y: newY };
-  }
-  
-  return snapPositionToGrid(newX, newY, gridSize);
-}
-
-/**
- * Apply snapping to resize bounds.
- */
-export function applySnapToResize(
-  bounds: { x: number; y: number; width: number; height: number },
-  gridSize: number,
-  snapEnabled: boolean
-): { x: number; y: number; width: number; height: number } {
-  if (!snapEnabled) {
-    return bounds;
-  }
-  
-  return snapBoundsToGrid(bounds.x, bounds.y, bounds.width, bounds.height, gridSize);
-}
-
 // =============================================================================
-// SMART SNAPPING (Future enhancement)
+// SMART GUIDES (Future Enhancement)
 // =============================================================================
 
-/**
- * Snap threshold - how close a value needs to be to snap (in canvas units).
- * Used for smart snapping to other elements' edges/centers.
- */
-export const SNAP_THRESHOLD = 5;
-
-/**
- * Check if a value is within snap threshold of a target.
- */
-export function isWithinSnapThreshold(
-  value: number,
-  target: number,
-  threshold: number = SNAP_THRESHOLD
-): boolean {
-  return Math.abs(value - target) <= threshold;
+export interface SnapGuide {
+  type: "vertical" | "horizontal";
+  position: number;
+  start: number;
+  end: number;
 }
 
 /**
- * Find the nearest snap point from a list of candidates.
- * Returns the snapped value if within threshold, otherwise the original value.
+ * Find snap guides for an element against other elements.
+ * Returns potential snap positions for alignment.
  */
-export function findNearestSnapPoint(
-  value: number,
-  candidates: number[],
-  threshold: number = SNAP_THRESHOLD
-): { value: number; snapped: boolean; snapTarget: number | null } {
-  let nearestDistance = Infinity;
-  let nearestTarget: number | null = null;
+export function findSnapGuides(
+  movingBounds: Bounds,
+  otherBounds: Bounds[],
+  threshold: number = 5
+): SnapGuide[] {
+  const guides: SnapGuide[] = [];
   
-  for (const candidate of candidates) {
-    const distance = Math.abs(value - candidate);
-    if (distance <= threshold && distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestTarget = candidate;
+  const movingEdges = {
+    left: movingBounds.x,
+    right: movingBounds.x + movingBounds.width,
+    top: movingBounds.y,
+    bottom: movingBounds.y + movingBounds.height,
+    centerX: movingBounds.x + movingBounds.width / 2,
+    centerY: movingBounds.y + movingBounds.height / 2,
+  };
+
+  for (const other of otherBounds) {
+    const otherEdges = {
+      left: other.x,
+      right: other.x + other.width,
+      top: other.y,
+      bottom: other.y + other.height,
+      centerX: other.x + other.width / 2,
+      centerY: other.y + other.height / 2,
+    };
+
+    // Check vertical alignments (left, center, right)
+    const verticalPairs = [
+      [movingEdges.left, otherEdges.left],
+      [movingEdges.left, otherEdges.right],
+      [movingEdges.right, otherEdges.left],
+      [movingEdges.right, otherEdges.right],
+      [movingEdges.centerX, otherEdges.centerX],
+    ];
+
+    for (const [moving, target] of verticalPairs) {
+      if (Math.abs(moving - target) <= threshold) {
+        guides.push({
+          type: "vertical",
+          position: target,
+          start: Math.min(movingBounds.y, other.y),
+          end: Math.max(movingBounds.y + movingBounds.height, other.y + other.height),
+        });
+      }
+    }
+
+    // Check horizontal alignments (top, center, bottom)
+    const horizontalPairs = [
+      [movingEdges.top, otherEdges.top],
+      [movingEdges.top, otherEdges.bottom],
+      [movingEdges.bottom, otherEdges.top],
+      [movingEdges.bottom, otherEdges.bottom],
+      [movingEdges.centerY, otherEdges.centerY],
+    ];
+
+    for (const [moving, target] of horizontalPairs) {
+      if (Math.abs(moving - target) <= threshold) {
+        guides.push({
+          type: "horizontal",
+          position: target,
+          start: Math.min(movingBounds.x, other.x),
+          end: Math.max(movingBounds.x + movingBounds.width, other.x + other.width),
+        });
+      }
     }
   }
-  
-  if (nearestTarget !== null) {
-    return { value: nearestTarget, snapped: true, snapTarget: nearestTarget };
-  }
-  
-  return { value, snapped: false, snapTarget: null };
-}
 
-// =============================================================================
-// GRID VISUALIZATION HELPERS
-// =============================================================================
-
-/**
- * Calculate grid lines that should be visible in the viewport.
- * Useful for rendering major grid lines differently.
- */
-export function getVisibleGridLines(
-  viewportWidth: number,
-  viewportHeight: number,
-  panX: number,
-  panY: number,
-  zoom: number,
-  gridSize: number
-): { 
-  vertical: number[]; 
-  horizontal: number[];
-  majorVertical: number[];
-  majorHorizontal: number[];
-} {
-  const scaledGridSize = gridSize * zoom;
-  const majorGridMultiple = 5; // Every 5th line is a major line
-  
-  // Calculate visible range in canvas coordinates
-  const startX = -panX / zoom;
-  const endX = (viewportWidth - panX) / zoom;
-  const startY = -panY / zoom;
-  const endY = (viewportHeight - panY) / zoom;
-  
-  // Find first grid line
-  const firstX = Math.floor(startX / gridSize) * gridSize;
-  const firstY = Math.floor(startY / gridSize) * gridSize;
-  
-  const vertical: number[] = [];
-  const horizontal: number[] = [];
-  const majorVertical: number[] = [];
-  const majorHorizontal: number[] = [];
-  
-  // Generate vertical lines
-  for (let x = firstX; x <= endX; x += gridSize) {
-    vertical.push(x);
-    if (x % (gridSize * majorGridMultiple) === 0) {
-      majorVertical.push(x);
-    }
-  }
-  
-  // Generate horizontal lines
-  for (let y = firstY; y <= endY; y += gridSize) {
-    horizontal.push(y);
-    if (y % (gridSize * majorGridMultiple) === 0) {
-      majorHorizontal.push(y);
-    }
-  }
-  
-  return { vertical, horizontal, majorVertical, majorHorizontal };
+  return guides;
 }

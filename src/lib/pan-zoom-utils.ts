@@ -1,13 +1,55 @@
 // =============================================================================
 // PAN & ZOOM UTILITIES
 // =============================================================================
-// Math helpers for Figma-style canvas navigation:
-// - Scroll wheel = pan vertically
-// - Shift + scroll wheel = pan horizontally
-// - Cmd/Ctrl + scroll wheel = zoom
-// - Middle mouse button drag = pan X/Y
-// - Space + left mouse drag = pan X/Y
-// - Trackpad pinch = zoom (native browser behavior)
+// Utilities for canvas panning and zooming.
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 5;
+export const ZOOM_STEP = 0.1;
+export const WHEEL_ZOOM_FACTOR = 0.001;
+
+// =============================================================================
+// PAN DETECTION
+// =============================================================================
+
+/**
+ * Determine if a mouse event should start panning.
+ * Pan starts with middle mouse button or space+left click.
+ */
+export function shouldStartPan(button: number, isSpacePressed: boolean): boolean {
+  // Middle mouse button
+  if (button === 1) return true;
+  
+  // Space + left click
+  if (button === 0 && isSpacePressed) return true;
+  
+  return false;
+}
+
+// =============================================================================
+// PAN CURSOR
+// =============================================================================
+
+/**
+ * Get the appropriate cursor for pan state.
+ */
+export function getPanCursor(isSpacePressed: boolean, isPanning: boolean): string {
+  if (isPanning) {
+    return "grabbing";
+  }
+  if (isSpacePressed) {
+    return "grab";
+  }
+  return "default";
+}
+
+// =============================================================================
+// WHEEL ZOOM
+// =============================================================================
 
 export interface PanZoomState {
   panX: number;
@@ -15,7 +57,7 @@ export interface PanZoomState {
   zoom: number;
 }
 
-export interface WheelEventInfo {
+export interface WheelEventData {
   deltaX: number;
   deltaY: number;
   ctrlKey: boolean;
@@ -25,264 +67,135 @@ export interface WheelEventInfo {
   clientY: number;
 }
 
-export interface PanZoomResult {
-  panX: number;
-  panY: number;
-  zoom: number;
-}
-
-// =============================================================================
-// CONSTANTS
-// =============================================================================
-
-export const MIN_ZOOM = 0.1; // 10%
-export const MAX_ZOOM = 4; // 400%
-export const ZOOM_LEVELS = [
-  0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4,
-];
-
-// Pan speed multiplier for scroll wheel
-const PAN_SPEED = 1;
-
-// Zoom speed for scroll wheel (how much zoom per pixel of scroll)
-const ZOOM_WHEEL_SPEED = 0.005;
-
-// Zoom speed for trackpad pinch (ctrlKey + wheel)
-const ZOOM_PINCH_SPEED = 0.01;
-
-// =============================================================================
-// WHEEL EVENT HANDLING
-// =============================================================================
-
 /**
- * Handle wheel events with Figma-style behavior:
- * - Normal scroll = pan Y
- * - Shift + scroll = pan X
- * - Cmd/Ctrl + scroll = zoom toward cursor
- * - Trackpad pinch (ctrlKey) = zoom toward cursor
- *
- * @param state Current pan/zoom state
- * @param event Wheel event info
- * @param viewportRect Bounding rect of the canvas container
- * @returns New pan/zoom state
+ * Handle wheel events for pan/zoom.
+ * - Ctrl/Cmd + wheel = zoom (centered on cursor)
+ * - Wheel alone = pan
+ * - Shift + wheel = horizontal pan
  */
 export function handleWheelEvent(
   state: PanZoomState,
-  event: WheelEventInfo,
-  viewportRect: DOMRect
-): PanZoomResult {
-  const {
-    deltaX,
-    deltaY,
-    ctrlKey,
-    metaKey,
-    shiftKey,
-    clientX,
-    clientY,
-  } = event;
-  let { panX, panY } = state;
-  const { zoom } = state;
+  event: WheelEventData,
+  containerRect: DOMRect
+): PanZoomState {
+  const { panX, panY, zoom } = state;
+  const { deltaX, deltaY, ctrlKey, metaKey, shiftKey, clientX, clientY } = event;
 
-  // Mouse position relative to viewport
-  const mouseX = clientX - viewportRect.left;
-  const mouseY = clientY - viewportRect.top;
+  // Zoom with Ctrl/Cmd + wheel
+  if (ctrlKey || metaKey) {
+    // Calculate cursor position relative to container
+    const cursorX = clientX - containerRect.left;
+    const cursorY = clientY - containerRect.top;
 
-  // Cmd/Ctrl + scroll OR trackpad pinch (ctrlKey) = zoom
-  if (metaKey || ctrlKey) {
-    // Use different speed for trackpad pinch vs scroll wheel
-    const speed =
-      ctrlKey && !metaKey ? ZOOM_PINCH_SPEED : ZOOM_WHEEL_SPEED;
-    const zoomDelta = -deltaY * speed;
-    const newZoom = clampZoom(zoom * (1 + zoomDelta));
+    // Calculate cursor position in canvas space before zoom
+    const canvasX = (cursorX - panX) / zoom;
+    const canvasY = (cursorY - panY) / zoom;
 
-    // Zoom toward cursor position
-    const result = zoomToPoint(
-      panX,
-      panY,
-      zoom,
-      newZoom,
-      mouseX,
-      mouseY
-    );
-    return result;
+    // Calculate new zoom level
+    const zoomDelta = -deltaY * WHEEL_ZOOM_FACTOR;
+    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (1 + zoomDelta)));
+
+    // Adjust pan to keep cursor position fixed
+    const newPanX = cursorX - canvasX * newZoom;
+    const newPanY = cursorY - canvasY * newZoom;
+
+    return {
+      panX: newPanX,
+      panY: newPanY,
+      zoom: newZoom,
+    };
   }
 
-  // Shift + scroll = pan horizontally
+  // Pan with wheel
+  let newPanX = panX;
+  let newPanY = panY;
+
   if (shiftKey) {
-    // Use deltaY for horizontal pan when shift is held (more intuitive)
-    panX -= deltaY * PAN_SPEED;
-    return { panX, panY, zoom };
+    // Shift + wheel = horizontal pan
+    newPanX = panX - deltaY;
+  } else {
+    // Normal wheel = vertical pan (and horizontal if trackpad)
+    newPanX = panX - deltaX;
+    newPanY = panY - deltaY;
   }
-
-  // Normal scroll = pan (deltaY for vertical, deltaX for horizontal)
-  // This handles both scroll wheel and trackpad two-finger scroll
-  panX -= deltaX * PAN_SPEED;
-  panY -= deltaY * PAN_SPEED;
-
-  return { panX, panY, zoom };
-}
-
-// =============================================================================
-// ZOOM HELPERS
-// =============================================================================
-
-/**
- * Clamp zoom to valid range
- */
-export function clampZoom(zoom: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
-}
-
-/**
- * Zoom toward a specific point, keeping that point stationary on screen.
- * This is the key formula for natural zoom behavior.
- */
-export function zoomToPoint(
-  panX: number,
-  panY: number,
-  oldZoom: number,
-  newZoom: number,
-  pointX: number,
-  pointY: number
-): PanZoomResult {
-  const clampedZoom = clampZoom(newZoom);
-
-  // Calculate canvas point under the cursor at old zoom
-  const canvasX = (pointX - panX) / oldZoom;
-  const canvasY = (pointY - panY) / oldZoom;
-
-  // Calculate new pan to keep that canvas point under cursor at new zoom
-  const newPanX = pointX - canvasX * clampedZoom;
-  const newPanY = pointY - canvasY * clampedZoom;
 
   return {
     panX: newPanX,
     panY: newPanY,
-    zoom: clampedZoom,
+    zoom,
   };
 }
 
-/**
- * Get the next zoom level up from current zoom
- */
-export function getNextZoomIn(currentZoom: number): number {
-  const nextLevel = ZOOM_LEVELS.find((level) => level > currentZoom);
-  return nextLevel ?? MAX_ZOOM;
-}
-
-/**
- * Get the next zoom level down from current zoom
- */
-export function getNextZoomOut(currentZoom: number): number {
-  const prevLevel = [...ZOOM_LEVELS]
-    .reverse()
-    .find((level) => level < currentZoom);
-  return prevLevel ?? MIN_ZOOM;
-}
-
-/**
- * Step zoom in toward a point
- */
-export function stepZoomIn(
-  panX: number,
-  panY: number,
-  zoom: number,
-  centerX: number,
-  centerY: number
-): PanZoomResult {
-  const newZoom = getNextZoomIn(zoom);
-  return zoomToPoint(panX, panY, zoom, newZoom, centerX, centerY);
-}
-
-/**
- * Step zoom out from a point
- */
-export function stepZoomOut(
-  panX: number,
-  panY: number,
-  zoom: number,
-  centerX: number,
-  centerY: number
-): PanZoomResult {
-  const newZoom = getNextZoomOut(zoom);
-  return zoomToPoint(panX, panY, zoom, newZoom, centerX, centerY);
-}
-
 // =============================================================================
-// PAN HELPERS
+// ZOOM TO POINT
 // =============================================================================
 
 /**
- * Calculate pan delta from mouse drag
+ * Zoom to a specific level, centered on a point.
  */
-export function calculatePanDelta(
-  startX: number,
-  startY: number,
-  currentX: number,
-  currentY: number,
-  startPanX: number,
-  startPanY: number
-): { panX: number; panY: number } {
-  const deltaX = currentX - startX;
-  const deltaY = currentY - startY;
+export function zoomToPoint(
+  state: PanZoomState,
+  targetZoom: number,
+  centerX: number,
+  centerY: number
+): PanZoomState {
+  const { panX, panY, zoom } = state;
+
+  // Clamp target zoom
+  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, targetZoom));
+
+  // Calculate point in canvas space
+  const canvasX = (centerX - panX) / zoom;
+  const canvasY = (centerY - panY) / zoom;
+
+  // Adjust pan to keep point fixed
+  const newPanX = centerX - canvasX * newZoom;
+  const newPanY = centerY - canvasY * newZoom;
 
   return {
-    panX: startPanX + deltaX,
-    panY: startPanY + deltaY,
+    panX: newPanX,
+    panY: newPanY,
+    zoom: newZoom,
   };
 }
 
 // =============================================================================
-// INPUT STATE DETECTION
+// FIT TO CONTENT
 // =============================================================================
 
-/**
- * Determine the pan mode based on input state
- */
-export type PanTrigger = 'space' | 'middle-mouse' | 'none';
-
-export interface InputState {
-  isSpacePressed: boolean;
-  isMiddleMouseDown: boolean;
-  isLeftMouseDown: boolean;
-}
-
-export function getPanTrigger(state: InputState): PanTrigger {
-  if (state.isMiddleMouseDown) return 'middle-mouse';
-  if (state.isSpacePressed && state.isLeftMouseDown) return 'space';
-  return 'none';
+export interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /**
- * Check if we should start panning based on mouse button and input state
+ * Calculate pan/zoom to fit content within viewport with padding.
  */
-export function shouldStartPan(
-  mouseButton: number,
-  isSpacePressed: boolean
-): boolean {
-  // Middle mouse button (button 1) always starts pan
-  if (mouseButton === 1) return true;
+export function fitToContent(
+  contentBounds: Bounds,
+  viewportWidth: number,
+  viewportHeight: number,
+  padding: number = 50
+): PanZoomState {
+  const { x, y, width, height } = contentBounds;
 
-  // Left mouse button (button 0) + space starts pan
-  if (mouseButton === 0 && isSpacePressed) return true;
+  // Available space after padding
+  const availableWidth = viewportWidth - padding * 2;
+  const availableHeight = viewportHeight - padding * 2;
 
-  return false;
-}
+  // Calculate zoom to fit
+  const zoomX = availableWidth / width;
+  const zoomY = availableHeight / height;
+  const zoom = Math.min(zoomX, zoomY, MAX_ZOOM);
 
-// =============================================================================
-// CURSOR HELPERS
-// =============================================================================
+  // Center content
+  const contentCenterX = x + width / 2;
+  const contentCenterY = y + height / 2;
 
-export type PanCursor = 'default' | 'grab' | 'grabbing';
+  const panX = viewportWidth / 2 - contentCenterX * zoom;
+  const panY = viewportHeight / 2 - contentCenterY * zoom;
 
-/**
- * Get the appropriate cursor for pan state
- */
-export function getPanCursor(
-  isSpacePressed: boolean,
-  isPanning: boolean
-): PanCursor {
-  if (isPanning) return 'grabbing';
-  if (isSpacePressed) return 'grab';
-  return 'default';
+  return { panX, panY, zoom };
 }
