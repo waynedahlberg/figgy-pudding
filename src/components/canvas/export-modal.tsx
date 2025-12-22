@@ -7,10 +7,8 @@ import {
   Download,
   Copy,
   Check,
-  FileImage,
   Layers,
   Square,
-  Palette,
 } from "lucide-react";
 import { useCanvasStore } from "@/hooks/use-canvas-store";
 import {
@@ -31,7 +29,6 @@ interface ExportModalProps {
 }
 
 type ExportScope = "all" | "selection";
-type ExportFormat = "svg" | "png"; // PNG for future implementation
 
 // =============================================================================
 // EXPORT MODAL
@@ -57,26 +54,32 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   const selectedCount = selectedIds.length;
   const totalCount = elements.filter((el) => el.visible).length;
 
-  // Auto-switch to "all" if selection is cleared
+  // Auto-switch to "all" if selection is cleared (use queueMicrotask to avoid cascading)
   useEffect(() => {
     if (!hasSelection && scope === "selection") {
-      setScope("all");
+      queueMicrotask(() => setScope("all"));
     }
   }, [hasSelection, scope]);
 
   // Generate preview SVG
   useEffect(() => {
-    if (!isOpen) return;
+    // Use queueMicrotask to defer all state updates
+    queueMicrotask(() => {
+      if (!isOpen) {
+        setPreviewSVG("");
+        return;
+      }
 
-    const options: ExportOptions = {
-      padding,
-      backgroundColor: includeBackground ? backgroundColor : undefined,
-      includeHidden,
-      selectedIds: scope === "selection" ? selectedIds : undefined,
-    };
+      const options: ExportOptions = {
+        padding,
+        backgroundColor: includeBackground ? backgroundColor : undefined,
+        includeHidden,
+        selectedIds: scope === "selection" ? selectedIds : undefined,
+      };
 
-    const svg = elementsToSVG(elements, options);
-    setPreviewSVG(svg);
+      const svg = elementsToSVG(elements, options);
+      setPreviewSVG(svg);
+    });
   }, [
     isOpen,
     elements,
