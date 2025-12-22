@@ -19,8 +19,5 @@ export { elementsToSVG, elementToSVGString } from "./svg-element-renderer";
 // Re-export tool bar components
 export { ToolBar, FloatingToolBar, FloatingElementsPanel, ToolIndicator } from "./tool-bar";
 
-// Re-export top toolbar
-export { TopToolbar, CompactTopBar } from "./top-toolbar";
-
 // Re-export pen tool hook for advanced usage
 export { usePenTool } from "./pen-tool";
