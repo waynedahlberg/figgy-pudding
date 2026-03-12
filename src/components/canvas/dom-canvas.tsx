@@ -482,7 +482,7 @@ export function DOMCanvas() {
         );
 
         if (snapEnabled) {
-          newBounds = applySnapToResize(newBounds, gridSize, true);
+          newBounds = applySnapToResize(newBounds, gridSize);
         }
 
         updateElement(dragState.resizeElementId, {

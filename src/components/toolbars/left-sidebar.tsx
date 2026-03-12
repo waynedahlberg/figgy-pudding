@@ -274,6 +274,8 @@ function LayerTypeIcon({ type }: { type: CanvasElement["type"] }) {
     ellipse: "bg-pink-500",
     text: "bg-green-500",
     image: "bg-orange-500",
+    group: "bg-cyan-500",
+    path: "bg-violet-500",
   };
 
   return (
