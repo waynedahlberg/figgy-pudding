@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "CanvasForge - Visual Design Tool",
+  title: "Zephyr - Vector-based canvas design",
   description: "A powerful canvas-based design tool built with Next.js",
 };
 
